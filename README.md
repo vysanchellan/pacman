@@ -81,7 +81,15 @@ cells per floor-pair stack vertically through the castle. `#` walls, `.` pellets
 `o` power pellets, `X` shafts, `-` the ghost-house door, `G` house interior, `P`
 spawn. All movement rules live here: `stepCell(layer,row,col,dir)` answers every
 "can I go this way?" question (wrap included). `node tools/validate.mjs` BFS-checks
-that all 797 dots are reachable and no open cell is a dead-end trap.
+that all 719 dots are reachable and no open cell is a dead-end trap.
+
+### Difficulty — endless levels
+Level 1 is fast but fair. Every clear re-arms the castle harder: ghosts close the
+speed gap (4.05 → 4.6 vs your 4.6+), power pellets weaken (8 s of frightened time
+down to 1.2 s), scatter breaks shrink (7 s → 3 s → 2 s), and house releases come
+almost immediately. **Cruise Elroy** is in: Blinky gains speed when the dots run
+low (+0.28 under 120 left, +0.55 under 50) — from level 2 on you must know your
+routes and read the four behaviours to survive.
 
 ### Movement engine (`src/main.js`)
 Everything moves cell-to-cell on the grid with interpolated world positions

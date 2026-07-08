@@ -75,7 +75,7 @@ canvas {
   letter-spacing: 3px;
 }
 
-#score, #highscore {
+#score, #highscore, #level {
   color: var(--accent);
   font-size: 26px;
   font-weight: 800;

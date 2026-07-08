@@ -12,19 +12,36 @@ import { sfx } from "./audio.js";
 
 // ---------------------------------------------------------------- constants
 const LAYER_H = 2.4; // world height between floors
-const PAC_SPEED = 4.2; // cells per second (bigger maze, brisker pace)
-const GHOST_SPEED = 3.7;
-const FRIGHT_SPEED = 2.5;
-const EYES_SPEED = 9.0;
-const EXIT_SPEED = 2.8;
-const FRIGHT_TIME = 8.0;
-const FRIGHT_BLINK = 2.5;
+const FRIGHT_SPEED = 2.6;
+const EYES_SPEED = 10.0;
+const EXIT_SPEED = 3.0;
+const FRIGHT_BLINK = 2.0;
 const PENDING_VERT_TTL = 6.0; // queued floor-change expires after this many seconds
-// scatter/chase wave schedule (seconds); last chase runs forever
-const WAVES = [
-  ["scatter", 7], ["chase", 20], ["scatter", 7], ["chase", 20],
-  ["scatter", 5], ["chase", 20], ["scatter", 5], ["chase", Infinity],
-];
+
+// Difficulty curve: level 1 is fast but fair; from level 2 on you need to
+// know the routes and read ghost behaviour. Ghosts close the speed gap,
+// scatter breaks shrink, power pellets weaken, releases come sooner.
+function levelTuning(level) {
+  const l = Math.min(level, 6);
+  return {
+    pacSpeed: 4.6 + 0.06 * (l - 1),
+    ghostSpeed: Math.min(4.05 + 0.18 * (l - 1), 4.6),
+    frightTime: Math.max(8 - 1.7 * (l - 1), 1.2),
+    releaseDelays: [
+      0,
+      Math.max(2 - 0.45 * (l - 1), 0.3),
+      Math.max(5 - 1.1 * (l - 1), 0.8),
+      Math.max(8 - 1.7 * (l - 1), 1.2),
+    ],
+    waves: l === 1
+      ? [["scatter", 7], ["chase", 20], ["scatter", 7], ["chase", 20],
+         ["scatter", 5], ["chase", 20], ["scatter", 5], ["chase", Infinity]]
+      : l === 2
+        ? [["scatter", 5], ["chase", 25], ["scatter", 4], ["chase", 25],
+           ["scatter", 3], ["chase", Infinity]]
+        : [["scatter", 3], ["chase", 35], ["scatter", 2], ["chase", Infinity]],
+  };
+}
 
 // per-floor accent colors: bottom teal, middle blue, top violet
 const FLOOR_COLORS = [0x2dd6c8, 0x4d6bff, 0xb36bff];
@@ -424,13 +441,36 @@ for (let i = 0; i < 7; i++) {
   mouthGeos.push(g);
 }
 const pacGroup = new THREE.Group();
-const pacBody = new THREE.Mesh(mouthGeos[3], toonMat(0xffb818));
+const pacBody = new THREE.Mesh(mouthGeos[3],
+  toonMat(0xffb818, { emissive: 0x452a00, emissiveIntensity: 0.35 }));
 const pacOutline = new THREE.Mesh(
   mouthGeos[3],
   new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide })
 );
 pacOutline.scale.setScalar(1.07);
-pacGroup.add(pacBody, pacOutline);
+// dark maw inside the mouth so the chomp reads as a real bite
+const maw = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 14),
+  toonMat(0x4a0d12));
+pacGroup.add(pacBody, pacOutline, maw);
+
+// soft warm aura behind him
+{
+  const aCanvas = document.createElement("canvas");
+  aCanvas.width = aCanvas.height = 128;
+  const actx = aCanvas.getContext("2d");
+  const ag = actx.createRadialGradient(64, 64, 6, 64, 64, 64);
+  ag.addColorStop(0, "rgba(255,190,60,0.5)");
+  ag.addColorStop(0.5, "rgba(255,140,40,0.18)");
+  ag.addColorStop(1, "rgba(255,120,30,0)");
+  actx.fillStyle = ag;
+  actx.fillRect(0, 0, 128, 128);
+  const aura = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(aCanvas), transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  }));
+  aura.scale.setScalar(1.9);
+  pacGroup.add(aura);
+}
 
 // horns
 for (const side of [-1, 1]) {
@@ -438,6 +478,12 @@ for (const side of [-1, 1]) {
   horn.position.set(0.02, 0.4, side * 0.15);
   horn.rotation.x = side * -0.45;
   pacGroup.add(horn);
+
+  // angry brow ridge over each eye
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.035, 0.16), toonMat(0x3a1c08));
+  brow.position.set(0.28, 0.33, side * 0.15);
+  brow.rotation.x = side * 0.55;
+  pacGroup.add(brow);
 
   // fierce glowing eye + black slit pupil
   const eye = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10),
@@ -608,15 +654,18 @@ const ghosts = GHOST_DEFS.map((def, i) => {
 
 // ---------------------------------------------------------------- game state
 const state = {
-  phase: "menu", // menu | ready | playing | dying | gameover | win
+  phase: "menu", // menu | ready | playing | dying | gameover
   phaseTimer: 0,
   score: 0,
   high: Number(localStorage.getItem("pacman3d-high") || 0),
   lives: 2, // remaining spare lives
+  level: 1,
+  tuning: levelTuning(1),
   pelletsLeft: 0,
   waveIndex: 0,
   waveTimer: 0,
   frightTimer: 0,
+  frightMax: 8,
   eatChain: 0,
   elapsed: 0,
 };
@@ -630,6 +679,7 @@ function setMessage(main, sub = "") {
 function updateHud() {
   $("score").textContent = state.score;
   $("highscore").textContent = state.high;
+  $("level").textContent = state.level;
   $("lives").innerHTML = "&#9679;".repeat(Math.max(0, state.lives)) || "&mdash;";
 }
 function addScore(n) {
@@ -713,7 +763,7 @@ function resetPositions() {
       g.state = "house";
       g.cell = [...g.slot];
       g.dir = null;
-      g.releaseTimer = g.releaseDelay;
+      g.releaseTimer = state.tuning.releaseDelays[i];
     }
     cellToWorld(...g.cell, g.pos);
   });
@@ -727,6 +777,8 @@ function resetPositions() {
 function newGame() {
   state.score = 0;
   state.lives = 2;
+  state.level = 1;
+  state.tuning = levelTuning(1);
   spawnPellets();
   state.pelletsLeft = pelletMeshes.size;
   resetPositions();
@@ -752,7 +804,7 @@ addEventListener("keydown", (e) => {
   if (e.repeat) return; // ignore OS key auto-repeat entirely
 
   if (e.code === "Enter") {
-    if (state.phase === "menu" || state.phase === "gameover" || state.phase === "win") {
+    if (state.phase === "menu" || state.phase === "gameover") {
       newGame();
     }
     return;
@@ -932,7 +984,7 @@ function updatePac(dt) {
       pac.dir = pac.desired;
     }
 
-    pac.t += (PAC_SPEED * dt) / segmentLength(pac.dir);
+    pac.t += (state.tuning.pacSpeed * dt) / segmentLength(pac.dir);
     if (pac.t >= 1) {
       pac.cell = pac.next;
       pac.moving = false;
@@ -985,7 +1037,8 @@ function eatAt(cell) {
   if (entry.power) {
     addScore(50);
     sfx.power();
-    state.frightTimer = FRIGHT_TIME;
+    state.frightTimer = state.tuning.frightTime;
+    state.frightMax = state.tuning.frightTime;
     state.eatChain = 0;
     for (const g of ghosts) {
       if (g.state === "eyes" || g.state === "entering") continue;
@@ -997,11 +1050,21 @@ function eatAt(cell) {
     sfx.waka();
   }
   updateHud();
-  if (state.pelletsLeft <= 0) {
-    state.phase = "win";
-    setMessage("YOU WIN!", "PRESS ENTER TO PLAY AGAIN");
-    sfx.win();
-  }
+  if (state.pelletsLeft <= 0) levelUp();
+}
+
+// endless levels: each clear re-arms the castle harder
+function levelUp() {
+  state.level++;
+  state.tuning = levelTuning(state.level);
+  spawnPellets();
+  state.pelletsLeft = pelletMeshes.size;
+  resetPositions();
+  state.phase = "ready";
+  state.phaseTimer = 2.6;
+  setMessage(`LEVEL ${state.level}`, state.level === 2 ? "NOW IT GETS SERIOUS" : "THE CASTLE SHARPENS");
+  sfx.win();
+  updateHud();
 }
 
 // ---------------------------------------------------------------- ghost update
@@ -1019,11 +1082,18 @@ function ghostSpeed(g) {
   if (g.state === "eyes" || g.state === "entering") return EYES_SPEED;
   if (g.state === "exiting") return EXIT_SPEED;
   if (g.frightened) return FRIGHT_SPEED;
-  return GHOST_SPEED;
+  let speed = state.tuning.ghostSpeed;
+  // Cruise Elroy: Blinky accelerates as the dots run out — learn to feel it
+  if (g.name === "blinky") {
+    if (state.pelletsLeft < 50) speed += 0.55;
+    else if (state.pelletsLeft < 120) speed += 0.28;
+  }
+  return speed;
 }
 
 function currentMode() {
-  return WAVES[Math.min(state.waveIndex, WAVES.length - 1)][0];
+  const waves = state.tuning.waves;
+  return waves[Math.min(state.waveIndex, waves.length - 1)][0];
 }
 
 function followPath(g, dt, speed, onDone) {
@@ -1216,13 +1286,13 @@ function updateVisibility() {
     const rel = l - fl;
     const above = rel > 0;
     const d = Math.min(Math.abs(rel), 2);
-    wallFillMats[l].opacity = at(above ? [0.92, 0.04, 0.02] : [0.92, 0.14, 0.06], d);
-    wallFillMats[l].emissiveIntensity = at([0.32, 0.12, 0.06], d);
-    wallEdgeMats[l].opacity = at(above ? [1.0, 0.14, 0.06] : [1.0, 0.45, 0.2], d);
-    floorPlateMats[l].opacity = at([0.5, 0.1, 0.06], d);
-    pelletMatByFloor[l].opacity = at(above ? [1.0, 0.1, 0.05] : [1.0, 0.3, 0.12], d);
-    powerMatByFloor[l].opacity = at(above ? [1.0, 0.3, 0.15] : [1.0, 0.5, 0.25], d);
-    towerMats[l].opacity = at([0.95, 0.3, 0.12], d);
+    wallFillMats[l].opacity = at(above ? [0.94, 0.025, 0.01] : [0.94, 0.1, 0.04], d);
+    wallFillMats[l].emissiveIntensity = at([0.35, 0.1, 0.05], d);
+    wallEdgeMats[l].opacity = at(above ? [1.0, 0.08, 0.03] : [1.0, 0.26, 0.1], d);
+    floorPlateMats[l].opacity = at([0.55, 0.08, 0.04], d);
+    pelletMatByFloor[l].opacity = at(above ? [1.0, 0.05, 0.02] : [1.0, 0.2, 0.08], d);
+    powerMatByFloor[l].opacity = at(above ? [1.0, 0.2, 0.1] : [1.0, 0.4, 0.18], d);
+    towerMats[l].opacity = at([0.95, 0.25, 0.1], d);
   }
 
   // shaft beams: glow when Pac-Man is standing where they can be used
@@ -1261,7 +1331,7 @@ function updateVisibility() {
   if (state.frightTimer > 0) {
     wrap.classList.add("on");
     wrap.classList.toggle("blink", state.frightTimer < FRIGHT_BLINK);
-    $("fright-bar").style.width = `${(state.frightTimer / FRIGHT_TIME) * 100}%`;
+    $("fright-bar").style.width = `${(state.frightTimer / state.frightMax) * 100}%`;
   } else {
     wrap.classList.remove("on", "blink");
   }
@@ -1304,8 +1374,9 @@ function tick(now) {
         }
       } else {
         state.waveTimer += dt;
-        const waveLen = WAVES[Math.min(state.waveIndex, WAVES.length - 1)][1];
-        if (state.waveTimer >= waveLen && state.waveIndex < WAVES.length - 1) {
+        const waves = state.tuning.waves;
+        const waveLen = waves[Math.min(state.waveIndex, waves.length - 1)][1];
+        if (state.waveTimer >= waveLen && state.waveIndex < waves.length - 1) {
           state.waveIndex++;
           state.waveTimer = 0;
           for (const g of ghosts) if (g.state === "normal") reverseGhost(g);
@@ -1343,7 +1414,6 @@ function tick(now) {
     }
 
     case "gameover":
-    case "win":
       for (const g of ghosts) updateGhostVisual(g, dt);
       break;
   }

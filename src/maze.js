@@ -12,7 +12,7 @@
 // The tunnel row (14) is open at both edges and wraps around, like the arcade.
 
 export const COLS = 28;
-export const ROWS = 31;
+export const ROWS = 30;
 export const LAYERS = 3;
 
 // the original maze, adapted: ghost house sits on the middle floor only
@@ -45,7 +45,6 @@ const OG = [
   "#......##....##....##......#",
   "#.##########.##.##########.#",
   "#.##########.##.##########.#",
-  "#..........................#",
   "#..........................#",
   "############################",
 ];
@@ -176,6 +175,6 @@ export const GHOST_HOUSE = {
 export const SCATTER_TARGETS = {
   blinky: [2, 1, 26],
   pinky: [2, 1, 1],
-  inky: [0, 29, 26],
-  clyde: [0, 29, 1],
+  inky: [0, 28, 26],
+  clyde: [0, 28, 1],
 };
