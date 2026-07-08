@@ -1,9 +1,11 @@
 # PAC-MAN 3D — Night Castle
 
-Classic Pac-Man extended into a true third dimension: a **three-floor neon castle**
-connected by vertical shafts, six-direction movement, and the four arcade ghost
+Classic Pac-Man extended into a true third dimension: the **original arcade maze
+(28×31), stacked as a three-floor neon castle** connected by vertical shafts, with
+six-direction movement, wrap-around side tunnels, and the four arcade ghost
 personalities faithfully generalized to 3D — wrapped in an anime night-world
-(cel shading, inked outlines, bloom, moon, starfield, sakura petals).
+(cel shading, inked outlines, bloom, moon, mountain skyline, drifting clouds,
+starfield, sakura petals).
 
 ![Stack](https://img.shields.io/badge/three.js-r164-blue) ![Build](https://img.shields.io/badge/build-none%20needed-brightgreen)
 
@@ -38,10 +40,13 @@ pulse when usable, with an on-screen prompt.
   `C` press away.
 - A **compass dial** (bottom-left) always shows maze-north (`N`) relative to your
   screen, and its gold needle points the way you're currently travelling.
+- **Ghost beacons**: every wraith carries a colored light pillar visible through
+  walls — you always know where each one is and (by the pillar's height) which
+  floor it's on. Beacons turn blue when frightened, faint white for returning eyes.
 - The **floor-stack widget** (right) shows which floor you and every ghost are on.
-- Your current floor renders solid; the others keep bright wireframe outlines
-  (per-floor colors: teal / blue / violet) and their pellets fade, so the maze
-  always reads at a glance.
+- **Asymmetric floor fading**: floors above you fade almost completely out (they
+  used to occlude the action); the floor below stays ghostly for depth; your own
+  floor renders bright and solid with boosted glow.
 
 ## The world
 
@@ -69,12 +74,14 @@ castle keep to be reborn.
 ## How the game works
 
 ### The maze (`src/maze.js`)
-Three 13×13 floors defined as ASCII maps. `#` walls, `.` pellets, `o` power pellets,
-`X` shaft cells (vertical travel allowed when the matching cell on the next floor is
-open), `-` the ghost-house door (ghost-only), `G` house interior, `P` spawn. All
-movement rules live here: `canStep(layer,row,col,dir)` answers every "can I go this
-way?" question for the six axis directions. `node tools/validate.mjs` BFS-checks that
-every pellet is reachable and no open cell is a dead-end trap.
+The **original arcade maze layout (28×31)** on all three floors — including the
+side tunnels, which wrap around exactly like the arcade. The ghost house (the keep)
+lives on the middle floor; on the other floors it's a sealed block. Eleven shaft
+cells per floor-pair stack vertically through the castle. `#` walls, `.` pellets,
+`o` power pellets, `X` shafts, `-` the ghost-house door, `G` house interior, `P`
+spawn. All movement rules live here: `stepCell(layer,row,col,dir)` answers every
+"can I go this way?" question (wrap included). `node tools/validate.mjs` BFS-checks
+that all 797 dots are reachable and no open cell is a dead-end trap.
 
 ### Movement engine (`src/main.js`)
 Everything moves cell-to-cell on the grid with interpolated world positions

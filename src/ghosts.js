@@ -1,7 +1,8 @@
 // Classic ghost AI, generalized to three dimensions.
 // Each ghost keeps its arcade personality; targeting simply happens in
-// (layer, row, col) space and movement considers all six directions.
-import { DIRS, canStep, GHOST_HOUSE, SCATTER_TARGETS } from "./maze.js";
+// (layer, row, col) space and movement considers all six directions,
+// including the wrap-around tunnel row.
+import { DIRS, stepCell, GHOST_HOUSE, SCATTER_TARGETS } from "./maze.js";
 
 export const GHOST_DEFS = [
   { name: "blinky", color: 0xff0000, releaseDelay: 0 },
@@ -53,20 +54,21 @@ export function chooseDirection(cell, currentDir, target, frightened, rng = Math
   const options = [];
   for (const { v } of DIRS) {
     if (reverse && v[0] === reverse[0] && v[1] === reverse[1] && v[2] === reverse[2]) continue;
-    if (canStep(l, r, c, v)) options.push(v);
+    const next = stepCell(l, r, c, v);
+    if (next) options.push({ v, next });
   }
   if (options.length === 0) return reverse; // dead end: only then reverse
-  if (frightened) return options[Math.floor(rng() * options.length)];
+  if (frightened) return options[Math.floor(rng() * options.length)].v;
   let best = options[0];
   let bestD = Infinity;
-  for (const v of options) {
-    const d = dist2([l + v[0], r + v[1], c + v[2]], target);
+  for (const o of options) {
+    const d = dist2(o.next, target);
     if (d < bestD) {
       bestD = d;
-      best = v;
+      best = o;
     }
   }
-  return best;
+  return best.v;
 }
 
 // BFS shortest-path first step — used by eaten-ghost eyes so they always
@@ -80,8 +82,8 @@ export function bfsDirection(from, to) {
   while (queue.length) {
     const cell = queue.shift();
     for (const { v } of DIRS) {
-      if (!canStep(cell[0], cell[1], cell[2], v)) continue;
-      const next = [cell[0] + v[0], cell[1] + v[1], cell[2] + v[2]];
+      const next = stepCell(cell[0], cell[1], cell[2], v);
+      if (!next) continue;
       const k = key(next);
       if (prev.has(k)) continue;
       prev.set(k, { cell, dir: v });

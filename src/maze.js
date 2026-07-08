@@ -1,4 +1,5 @@
-// 3D maze definition. 3 layers (floors), each 13x13.
+// 3D maze: the original arcade maze layout (28x31), stacked as 3 floors of a
+// castle and connected by vertical shafts.
 // Legend:
 //   #  wall
 //   .  pellet
@@ -8,62 +9,75 @@
 //   G  ghost house interior
 //   P  pac-man spawn (open, no pellet)
 //   (space) open, no pellet
+// The tunnel row (14) is open at both edges and wraps around, like the arcade.
 
-export const COLS = 13;
-export const ROWS = 13;
+export const COLS = 28;
+export const ROWS = 31;
 export const LAYERS = 3;
 
-// layer 0 = bottom floor, layer 2 = top floor
-const LAYER_MAPS = [
-  // ---- layer 0 (bottom) ----
-  [
-    "#############",
-    "#o....#....o#",
-    "#.###.#.###.#",
-    "#.#...X...#.#",
-    "#.#.#####.#.#",
-    "#.....#.....#",
-    "###.#.#.#.###",
-    "#.....#.....#",
-    "#.#.#####.#.#",
-    "#.#...X...#.#",
-    "#.###.#.###.#",
-    "#o....#....o#",
-    "#############",
-  ],
-  // ---- layer 1 (middle, ghost house) ----
-  [
-    "#############",
-    "#.....X.....#",
-    "#.###.#.###.#",
-    "#...........#",
-    "#.#.##-##.#.#",
-    "#.#.#GGG#.#.#",
-    "#X..#####..X#",
-    "#.#.......#.#",
-    "#.#.#####.#.#",
-    "#.....P.....#",
-    "#.###.#.###.#",
-    "#X....#....X#",
-    "#############",
-  ],
-  // ---- layer 2 (top) ----
-  [
-    "#############",
-    "#o....X....o#",
-    "#.###.#.###.#",
-    "#.....#.....#",
-    "###.#.#.#.###",
-    "#.....#.....#",
-    "#X.#.....#.X#",
-    "#.....#.....#",
-    "###.#.#.#.###",
-    "#.....#.....#",
-    "#.###.#.###.#",
-    "#X....o....X#",
-    "#############",
-  ],
+// the original maze, adapted: ghost house sits on the middle floor only
+const OG = [
+  "############################",
+  "#............##............#",
+  "#.####.#####.##.#####.####.#",
+  "#o####.#####.##.#####.####o#",
+  "#.####.#####.##.#####.####.#",
+  "#..........................#",
+  "#.####.##.########.##.####.#",
+  "#.####.##.########.##.####.#",
+  "#......##....##....##......#",
+  "######.##### ## #####.######",
+  "######.##### ## #####.######",
+  "######.##          ##.######",
+  "######.## ###--### ##.######",
+  "######.## #GGGGGG# ##.######",
+  "      .   #GGGGGG#   .      ",
+  "######.## #GGGGGG# ##.######",
+  "######.## ######## ##.######",
+  "######.##          ##.######",
+  "######.## ######## ##.######",
+  "######.## ######## ##.######",
+  "#............##............#",
+  "#.####.#####.##.#####.####.#",
+  "#o..##.......P........##..o#",
+  "###.##.##.########.##.##.###",
+  "###.##.##.########.##.##.###",
+  "#......##....##....##......#",
+  "#.##########.##.##########.#",
+  "#.##########.##.##########.#",
+  "#..........................#",
+  "#..........................#",
+  "############################",
 ];
+
+// shaft cells — identical (row, col) on every floor so the columns stack
+const SHAFTS = [
+  [1, 6], [1, 21],
+  [5, 6], [5, 21],
+  [8, 12], [8, 15],
+  [14, 6], [14, 21],
+  [22, 6], [22, 21],
+  [28, 13],
+];
+
+function buildLayer(isMiddle) {
+  return OG.map((row, r) => {
+    let out = "";
+    for (let c = 0; c < COLS; c++) {
+      let ch = row[c];
+      if (!isMiddle) {
+        // seal the ghost house on the other floors; it reads as the keep
+        if (ch === "G" || ch === "-") ch = "#";
+        if (ch === "P") ch = ".";
+      }
+      if (SHAFTS.some(([sr, sc]) => sr === r && sc === c)) ch = "X";
+      out += ch;
+    }
+    return out;
+  });
+}
+
+const LAYER_MAPS = [buildLayer(false), buildLayer(true), buildLayer(false)];
 
 export const WALL = "#";
 export const DOOR = "-";
@@ -100,10 +114,23 @@ export const DIRS = [
   { key: "down", v: [-1, 0, 0] },
 ];
 
-export function canStep(layer, row, col, dir) {
+// The cell one step away in a direction, with arcade tunnel wrap on the
+// columns; null when the move is blocked.
+export function stepCell(layer, row, col, dir) {
   const [dl, dr, dc] = dir;
-  if (dl !== 0) return canMoveVertical(layer, layer + dl, row, col);
-  return isOpen(layer, row + dr, col + dc);
+  if (dl !== 0) {
+    return canMoveVertical(layer, layer + dl, row, col) ? [layer + dl, row, col] : null;
+  }
+  const nr = row + dr;
+  let nc = col + dc;
+  if (nc < 0) nc = COLS - 1;
+  else if (nc >= COLS) nc = 0;
+  if (nr < 0 || nr >= ROWS) return null;
+  return isOpen(layer, nr, nc) ? [layer, nr, nc] : null;
+}
+
+export function canStep(layer, row, col, dir) {
+  return stepCell(layer, row, col, dir) !== null;
 }
 
 export function collectCells() {
@@ -134,21 +161,21 @@ export function collectCells() {
   return { pellets, powerPellets, walls, shafts, pacmanSpawn, doorCell, houseCells };
 }
 
-// Ghost spawns and scripted house-exit geometry.
+// Ghost spawns and scripted house-exit geometry (middle floor keep).
 export const GHOST_HOUSE = {
-  door: [1, 4, 6], // [layer, row, col]
-  outside: [1, 3, 6], // first normal cell after leaving the house
+  door: [1, 12, 13], // [layer, row, col]
+  outside: [1, 11, 13], // first normal cell after leaving the house
   inside: [
-    [1, 5, 6], // center slot (Pinky)
-    [1, 5, 5], // left slot (Inky)
-    [1, 5, 7], // right slot (Clyde)
+    [1, 13, 13], // center slot (Pinky)
+    [1, 13, 11], // left slot (Inky)
+    [1, 13, 15], // right slot (Clyde)
   ],
 };
 
 // 3D scatter corners, one per ghost, spread across floors.
 export const SCATTER_TARGETS = {
-  blinky: [2, 1, 11],
+  blinky: [2, 1, 26],
   pinky: [2, 1, 1],
-  inky: [0, 11, 11],
-  clyde: [0, 11, 1],
+  inky: [0, 29, 26],
+  clyde: [0, 29, 1],
 };

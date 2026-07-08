@@ -1,6 +1,6 @@
 // Maze sanity checker: run with `node tools/validate.mjs`
 import {
-  LAYERS, ROWS, COLS, cellAt, isOpen, canStep, DIRS, collectCells, GHOST_HOUSE,
+  LAYERS, ROWS, COLS, cellAt, isOpen, stepCell, DIRS, collectCells, GHOST_HOUSE,
 } from "../src/maze.js";
 
 const { pellets, powerPellets, pacmanSpawn } = collectCells();
@@ -13,8 +13,8 @@ const queue = [pacmanSpawn];
 while (queue.length) {
   const [l, r, c] = queue.shift();
   for (const { v } of DIRS) {
-    if (!canStep(l, r, c, v)) continue;
-    const next = [l + v[0], r + v[1], c + v[2]];
+    const next = stepCell(l, r, c, v); // wrap-aware, like the game
+    if (!next) continue;
     const k = key(...next);
     if (!visited.has(k)) {
       visited.add(k);
@@ -36,7 +36,7 @@ for (let l = 0; l < LAYERS; l++) {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       if (!isOpen(l, r, c)) continue;
-      const exits = DIRS.filter(({ v }) => canStep(l, r, c, v)).length;
+      const exits = DIRS.filter(({ v }) => stepCell(l, r, c, v) !== null).length;
       if (exits < 2) {
         console.error(`DEAD END (${exits} exit): layer ${l}, row ${r}, col ${c}`);
         errors++;

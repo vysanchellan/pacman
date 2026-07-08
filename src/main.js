@@ -5,18 +5,18 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import {
-  LAYERS, ROWS, COLS, canStep, canMoveVertical, collectCells, GHOST_HOUSE,
+  LAYERS, ROWS, COLS, canStep, stepCell, canMoveVertical, collectCells, GHOST_HOUSE,
 } from "./maze.js";
 import { GHOST_DEFS, pickTarget, chooseDirection, bfsDirection } from "./ghosts.js";
 import { sfx } from "./audio.js";
 
 // ---------------------------------------------------------------- constants
 const LAYER_H = 2.4; // world height between floors
-const PAC_SPEED = 3.8; // cells per second
-const GHOST_SPEED = 3.1;
-const FRIGHT_SPEED = 2.1;
-const EYES_SPEED = 7.0;
-const EXIT_SPEED = 2.4;
+const PAC_SPEED = 4.2; // cells per second (bigger maze, brisker pace)
+const GHOST_SPEED = 3.7;
+const FRIGHT_SPEED = 2.5;
+const EYES_SPEED = 9.0;
+const EXIT_SPEED = 2.8;
 const FRIGHT_TIME = 8.0;
 const FRIGHT_BLINK = 2.5;
 const PENDING_VERT_TTL = 6.0; // queued floor-change expires after this many seconds
@@ -40,9 +40,19 @@ const cellToWorld = (l, r, c, out = new THREE.Vector3()) =>
 // ease-in-out used for vertical rides and camera blends
 const smooth = (t) => t * t * (3 - 2 * t);
 
+// world position of a segment's end; when the segment crosses the tunnel wrap
+// the target is rendered one cell past the edge so motion stays smooth
+function segmentTarget(cellA, cellB, dir, out) {
+  cellToWorld(cellB[0], cellB[1], cellB[2], out);
+  if (Math.abs(cellB[2] - cellA[2]) > 1) {
+    out.x = cellA[2] - (COLS - 1) / 2 + dir[2];
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- three.js setup
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x10061f, 32, 95);
+scene.fog = new THREE.Fog(0x10061f, 45, 135);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 300);
 
@@ -61,8 +71,8 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = false;
-controls.minDistance = 5;
-controls.maxDistance = 34;
+controls.minDistance = 6;
+controls.maxDistance = 55;
 controls.maxPolarAngle = Math.PI * 0.49;
 
 scene.add(new THREE.HemisphereLight(0x8f9dff, 0x2a1440, 0.85));
@@ -106,7 +116,7 @@ const toonMat = (color, opts = {}) =>
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 16, 256);
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(140, 24, 16),
+    new THREE.SphereGeometry(180, 24, 16),
     new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(skyCanvas), side: THREE.BackSide, fog: false })
   );
   scene.add(sky);
@@ -128,23 +138,83 @@ const toonMat = (color, opts = {}) =>
   moon.scale.setScalar(30);
   scene.add(moon);
 
-  const grid = new THREE.GridHelper(80, 50, 0x5a2d8a, 0x241040);
+  const grid = new THREE.GridHelper(160, 80, 0x5a2d8a, 0x241040);
   grid.position.y = -1.6;
   grid.material.transparent = true;
   grid.material.opacity = 0.45;
   scene.add(grid);
 
+  // jagged mountain skyline ringing the horizon
+  const mCanvas = document.createElement("canvas");
+  mCanvas.width = 1024;
+  mCanvas.height = 128;
+  const mctx = mCanvas.getContext("2d");
+  mctx.fillStyle = "#150a2e";
+  mctx.beginPath();
+  mctx.moveTo(0, 128);
+  let mx = 0;
+  while (mx < 1024) {
+    mctx.lineTo(mx + 30 + Math.random() * 40, 128 - (35 + Math.random() * 70));
+    mx += 60 + Math.random() * 50;
+    mctx.lineTo(Math.min(mx, 1024), 128 - (8 + Math.random() * 22));
+  }
+  mctx.lineTo(1024, 128);
+  mctx.closePath();
+  mctx.fill();
+  const mTex = new THREE.CanvasTexture(mCanvas);
+  mTex.wrapS = THREE.RepeatWrapping;
+  mTex.repeat.x = 3;
+  const mountains = new THREE.Mesh(
+    new THREE.CylinderGeometry(130, 130, 48, 64, 1, true),
+    new THREE.MeshBasicMaterial({ map: mTex, transparent: true, side: THREE.BackSide, fog: false, depthWrite: false })
+  );
+  mountains.position.y = 16;
+  scene.add(mountains);
+
   const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(400 * 3);
-  for (let i = 0; i < 400; i++) {
-    const v = new THREE.Vector3().randomDirection().multiplyScalar(70 + Math.random() * 50);
-    v.y = Math.abs(v.y) * 0.6 - 5;
+  const starPos = new Float32Array(500 * 3);
+  for (let i = 0; i < 500; i++) {
+    const v = new THREE.Vector3().randomDirection().multiplyScalar(100 + Math.random() * 60);
+    v.y = Math.abs(v.y) * 0.7 - 4;
     starPos.set([v.x, v.y, v.z], i * 3);
   }
   starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-    color: 0x9aa8ff, size: 0.35, transparent: true, opacity: 0.8, sizeAttenuation: true, fog: false,
+    color: 0x9aa8ff, size: 0.4, transparent: true, opacity: 0.8, sizeAttenuation: true, fog: false,
   })));
+}
+
+// soft drifting clouds
+const cloudSprites = [];
+{
+  const cCanvas = document.createElement("canvas");
+  cCanvas.width = 256;
+  cCanvas.height = 128;
+  const cctx = cCanvas.getContext("2d");
+  const cg = cctx.createRadialGradient(128, 64, 8, 128, 64, 120);
+  cg.addColorStop(0, "rgba(205,180,255,0.55)");
+  cg.addColorStop(0.55, "rgba(180,150,240,0.25)");
+  cg.addColorStop(1, "rgba(160,130,230,0)");
+  cctx.fillStyle = cg;
+  cctx.fillRect(0, 0, 256, 128);
+  const cTex = new THREE.CanvasTexture(cCanvas);
+  for (let i = 0; i < 6; i++) {
+    const cloud = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: cTex, transparent: true, opacity: 0.5, fog: false, depthWrite: false,
+    }));
+    cloud.position.set((Math.random() - 0.5) * 180, 24 + Math.random() * 16, (Math.random() - 0.5) * 180);
+    cloud.scale.set(34 + Math.random() * 18, 12 + Math.random() * 6, 1);
+    cloud.userData.speed = 0.8 + Math.random() * 1.0;
+    scene.add(cloud);
+    cloudSprites.push(cloud);
+  }
+}
+
+function updateClouds(dt) {
+  for (const cloud of cloudSprites) {
+    cloud.position.x += cloud.userData.speed * dt;
+    if (cloud.position.x > 110) cloud.position.x = -110;
+  }
 }
 
 const PETALS = 140;
@@ -152,7 +222,7 @@ const petalGeo = new THREE.BufferGeometry();
 const petalPos = new Float32Array(PETALS * 3);
 const petalSeed = new Float32Array(PETALS);
 for (let i = 0; i < PETALS; i++) {
-  petalPos.set([(Math.random() - 0.5) * 26, Math.random() * 9 - 1, (Math.random() - 0.5) * 26], i * 3);
+  petalPos.set([(Math.random() - 0.5) * 40, Math.random() * 10 - 1, (Math.random() - 0.5) * 44], i * 3);
   petalSeed[i] = Math.random() * Math.PI * 2;
 }
 petalGeo.setAttribute("position", new THREE.BufferAttribute(petalPos, 3));
@@ -240,15 +310,19 @@ const towerMats = []; // corner towers per floor
     // watchtowers on the four corners give each floor a castle silhouette
     const towerMat = toonMat(color, { transparent: true, opacity: 0.9 });
     towerMats.push(towerMat);
-    const half = (COLS - 1) / 2 + 0.5;
+    const hx = (COLS - 1) / 2 + 0.7;
+    const hz = (ROWS - 1) / 2 + 0.7;
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
         const tower = new THREE.Group();
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 1.35, 12), towerMat);
-        const roof = new THREE.Mesh(new THREE.ConeGeometry(0.58, 0.7, 12), towerMat);
-        roof.position.y = 1.0;
-        tower.add(barrel, roof);
-        tower.position.set(sx * half, l * LAYER_H + 0.15, sz * half);
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.68, 1.7, 12), towerMat);
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(0.78, 0.95, 12), towerMat);
+        roof.position.y = 1.3;
+        const glow = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8),
+          new THREE.MeshBasicMaterial({ color: 0xffd447 }));
+        glow.position.y = 1.85;
+        tower.add(barrel, roof, glow);
+        tower.position.set(sx * hx, l * LAYER_H + 0.25, sz * hz);
         scene.add(tower);
       }
     }
@@ -302,24 +376,38 @@ for (let l = 0; l < LAYERS; l++) {
   }));
 }
 const pelletKey = (l, r, c) => `${l},${r},${c}`;
-const pelletMeshes = new Map(); // key -> { mesh, power }
+// ~800 pellets: instanced per floor (one draw call each); eating zero-scales
+const pelletsByFloor = [[], [], []];
+for (const cell of mazeData.pellets) pelletsByFloor[cell[0]].push(cell);
+const pelletInst = pelletsByFloor.map((list, l) => {
+  const inst = new THREE.InstancedMesh(pelletGeo, pelletMatByFloor[l], list.length);
+  scene.add(inst);
+  return inst;
+});
+const ZERO_M = new THREE.Matrix4().makeScale(0, 0, 0);
+const pelletMeshes = new Map(); // key -> { power:false, floor, index } | { power:true, mesh }
 const powerMeshes = [];
 
 function spawnPellets() {
-  for (const { mesh } of pelletMeshes.values()) scene.remove(mesh);
   pelletMeshes.clear();
+  const m = new THREE.Matrix4();
+  const v = new THREE.Vector3();
+  pelletsByFloor.forEach((list, l) => {
+    list.forEach(([ll, r, c], i) => {
+      cellToWorld(ll, r, c, v);
+      m.makeTranslation(v.x, v.y, v.z);
+      pelletInst[l].setMatrixAt(i, m);
+      pelletMeshes.set(pelletKey(ll, r, c), { power: false, floor: l, index: i });
+    });
+    pelletInst[l].instanceMatrix.needsUpdate = true;
+  });
+  for (const mesh of powerMeshes) scene.remove(mesh);
   powerMeshes.length = 0;
-  for (const [l, r, c] of mazeData.pellets) {
-    const mesh = new THREE.Mesh(pelletGeo, pelletMatByFloor[l]);
-    cellToWorld(l, r, c, mesh.position);
-    scene.add(mesh);
-    pelletMeshes.set(pelletKey(l, r, c), { mesh, power: false });
-  }
   for (const [l, r, c] of mazeData.powerPellets) {
     const mesh = new THREE.Mesh(powerGeo, powerMatByFloor[l]);
     cellToWorld(l, r, c, mesh.position);
     scene.add(mesh);
-    pelletMeshes.set(pelletKey(l, r, c), { mesh, power: true });
+    pelletMeshes.set(pelletKey(l, r, c), { power: true, mesh });
     powerMeshes.push(mesh);
   }
 }
@@ -489,6 +577,22 @@ const pac = {
 const ghosts = GHOST_DEFS.map((def, i) => {
   const vis = makeGhostMesh(def.color, def.name);
   scene.add(vis.group);
+  // beacon pillar: always visible through walls so you can spot every wraith
+  // and read its floor at a glance
+  const beaconMat = new THREE.MeshBasicMaterial({
+    color: def.color, transparent: true, opacity: 0.5,
+    depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const beacon = new THREE.Group();
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.5, 8), beaconMat);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.3, 8), beaconMat);
+  tip.rotation.x = Math.PI; // point down at the wraith
+  tip.position.y = -0.85;
+  beacon.add(pillar, tip);
+  beacon.renderOrder = 30;
+  scene.add(beacon);
+  vis.beacon = beacon;
+  vis.beaconMat = beaconMat;
   return {
     ...def,
     vis,
@@ -717,9 +821,9 @@ function horizontalKeyToDir(code) {
 // direction-reading trivial. FOLLOW adds a slow eased drift behind Pac-Man's
 // heading, and the compass dial keeps you oriented in every mode.
 const CAM_MODES = [
-  { name: "FIXED", offset: new THREE.Vector3(0, 10.5, 9.5), rotate: false },
-  { name: "FOLLOW", offset: new THREE.Vector3(0, 10.5, 9.5), rotate: true },
-  { name: "TOP-DOWN", offset: new THREE.Vector3(0, 16.5, 0.02), rotate: false },
+  { name: "FIXED", offset: new THREE.Vector3(0, 12.5, 11.5), rotate: false },
+  { name: "FOLLOW", offset: new THREE.Vector3(0, 12.5, 11.5), rotate: true },
+  { name: "TOP-DOWN", offset: new THREE.Vector3(0, 30, 0.05), rotate: false },
 ];
 let camMode = 0;
 let camTween = null;
@@ -792,10 +896,11 @@ function tryBeginSegment() {
   // only horizontal movement auto-continues: floor changes are one press = one floor
   if (pac.dir && (pac.dir[1] || pac.dir[2])) candidates.push(pac.dir);
   for (const d of candidates) {
-    if (!canStep(...pac.cell, d)) continue;
+    const nxt = stepCell(...pac.cell, d); // wrap-aware
+    if (!nxt) continue;
     if (d === pac.pendingVertical) pac.pendingVertical = null;
     pac.dir = d;
-    pac.next = [pac.cell[0] + d[0], pac.cell[1] + d[1], pac.cell[2] + d[2]];
+    pac.next = nxt;
     pac.t = 0;
     pac.moving = true;
     return true;
@@ -841,7 +946,7 @@ function updatePac(dt) {
   // world position — vertical rides get an ease-in-out so floor changes glide
   const a = cellToWorld(...pac.cell, new THREE.Vector3());
   if (pac.moving) {
-    const b = cellToWorld(...pac.next, new THREE.Vector3());
+    const b = segmentTarget(pac.cell, pac.next, pac.dir, new THREE.Vector3());
     pac.pos.lerpVectors(a, b, pac.dir[0] !== 0 ? smooth(pac.t) : pac.t);
     if (pac.dir[0] === 0) {
       pac.lastHorizWorld = new THREE.Vector3(pac.dir[2], 0, pac.dir[1]);
@@ -869,7 +974,12 @@ function eatAt(cell) {
   const k = pelletKey(...cell);
   const entry = pelletMeshes.get(k);
   if (!entry) return;
-  scene.remove(entry.mesh);
+  if (entry.power) {
+    scene.remove(entry.mesh);
+  } else {
+    pelletInst[entry.floor].setMatrixAt(entry.index, ZERO_M);
+    pelletInst[entry.floor].instanceMatrix.needsUpdate = true;
+  }
   pelletMeshes.delete(k);
   state.pelletsLeft--;
   if (entry.power) {
@@ -990,7 +1100,9 @@ function updateGhost(g, dt) {
   // world position — same vertical easing as Pac-Man
   const a = cellToWorld(...g.cell, new THREE.Vector3());
   if (g.next) {
-    const b = cellToWorld(...g.next, new THREE.Vector3());
+    const b = g.dir
+      ? segmentTarget(g.cell, g.next, g.dir, new THREE.Vector3())
+      : cellToWorld(...g.next, new THREE.Vector3());
     g.pos.lerpVectors(a, b, g.next[0] !== g.cell[0] ? smooth(g.t) : g.t);
   } else {
     g.pos.copy(a);
@@ -1004,8 +1116,10 @@ function stepGhostNormally(g, dt, speed, target, frightened = false, useBfs = fa
       ? bfsDirection(g.cell, target)
       : chooseDirection(g.cell, g.dir, target, frightened);
     if (!dir) return;
+    const nxt = stepCell(...g.cell, dir);
+    if (!nxt) return;
     g.dir = dir;
-    g.next = [g.cell[0] + dir[0], g.cell[1] + dir[1], g.cell[2] + dir[2]];
+    g.next = nxt;
     g.t = 0;
   }
   g.t += (speed * dt) / segmentLength(g.dir);
@@ -1017,8 +1131,21 @@ function stepGhostNormally(g, dt, speed, target, frightened = false, useBfs = fa
 }
 
 function updateGhostVisual(g, dt) {
-  const { group, body, tintMats, eyeMats, eyes } = g.vis;
+  const { group, body, tintMats, eyeMats, eyes, beacon, beaconMat } = g.vis;
   group.position.copy(g.pos);
+
+  // beacon tracks the wraith from above, tinted by its state
+  beacon.position.set(g.pos.x, g.pos.y + 1.5, g.pos.z);
+  if (g.state === "eyes" || g.state === "entering") {
+    beaconMat.color.setHex(0xffffff);
+    beaconMat.opacity = 0.2;
+  } else if (g.frightened) {
+    beaconMat.color.setHex(0x3355ff);
+    beaconMat.opacity = 0.45;
+  } else {
+    beaconMat.color.setHex(g.color);
+    beaconMat.opacity = 0.5;
+  }
   // floating spirit bob
   body.position.y = -0.02 + Math.sin(state.elapsed * 5 + g.releaseDelay * 2) * 0.045;
 
@@ -1083,14 +1210,19 @@ function updateVisibility() {
     const f = Math.min(Math.max(d - i, 0), 1);
     return vals[i] + (vals[i + 1] - vals[i]) * f;
   };
+  // asymmetric: floors ABOVE you fade almost out (they occlude the view),
+  // floors below stay ghostly so depth still reads
   for (let l = 0; l < LAYERS; l++) {
-    const d = Math.min(Math.abs(l - fl), 2);
-    wallFillMats[l].opacity = at([0.8, 0.10, 0.05], d);
-    wallEdgeMats[l].opacity = at([1.0, 0.5, 0.22], d);
-    floorPlateMats[l].opacity = at([0.4, 0.12, 0.12], d);
-    pelletMatByFloor[l].opacity = at([1.0, 0.35, 0.15], d);
-    powerMatByFloor[l].opacity = at([1.0, 0.5, 0.25], d);
-    towerMats[l].opacity = at([0.95, 0.4, 0.2], d);
+    const rel = l - fl;
+    const above = rel > 0;
+    const d = Math.min(Math.abs(rel), 2);
+    wallFillMats[l].opacity = at(above ? [0.92, 0.04, 0.02] : [0.92, 0.14, 0.06], d);
+    wallFillMats[l].emissiveIntensity = at([0.32, 0.12, 0.06], d);
+    wallEdgeMats[l].opacity = at(above ? [1.0, 0.14, 0.06] : [1.0, 0.45, 0.2], d);
+    floorPlateMats[l].opacity = at([0.5, 0.1, 0.06], d);
+    pelletMatByFloor[l].opacity = at(above ? [1.0, 0.1, 0.05] : [1.0, 0.3, 0.12], d);
+    powerMatByFloor[l].opacity = at(above ? [1.0, 0.3, 0.15] : [1.0, 0.5, 0.25], d);
+    towerMats[l].opacity = at([0.95, 0.3, 0.12], d);
   }
 
   // shaft beams: glow when Pac-Man is standing where they can be used
@@ -1148,6 +1280,7 @@ function tick(now) {
   const pulse = 1 + Math.sin(state.elapsed * 6) * 0.25;
   for (const mesh of powerMeshes) mesh.scale.setScalar(pulse);
   updatePetals(dt, state.elapsed);
+  updateClouds(dt);
 
   switch (state.phase) {
     case "menu":
