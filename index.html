@@ -17,31 +17,35 @@
 <body>
   <div id="hud">
     <div id="hud-top">
-      <div class="hud-block">
-        <span class="hud-label">SCORE</span>
-        <span id="score">0</span>
+      <div class="panel stat-group">
+        <div class="stat"><span class="hud-label">SCORE</span><span id="score">0</span></div>
+        <div class="stat"><span class="hud-label">HIGH</span><span id="highscore">0</span></div>
       </div>
-      <div class="hud-block">
-        <span class="hud-label">HIGH</span>
-        <span id="highscore">0</span>
-      </div>
-      <div class="hud-block">
-        <span class="hud-label">LIVES</span>
-        <span id="lives">&#9679;&#9679;</span>
-      </div>
-      <div class="hud-block">
-        <span class="hud-label">FLOOR</span>
-        <span id="layer">2 / 3</span>
+      <div id="fright-wrap"><div id="fright-bar"></div></div>
+      <div class="panel stat-group">
+        <div class="stat"><span class="hud-label">LIVES</span><span id="lives"></span></div>
       </div>
     </div>
+
+    <div id="floor-stack" class="panel"></div>
+
     <div id="message"></div>
-    <div id="hud-bottom">
-      <span>MOVE: WASD / ARROWS</span>
-      <span>UP FLOOR: E / SPACE</span>
-      <span>DOWN FLOOR: Q / SHIFT</span>
-      <span>CAMERA: MOUSE DRAG</span>
+    <div id="shaft-hint"></div>
+
+    <div id="vert-buttons">
+      <button id="btn-up" title="Go up a floor (PgUp / E / Space)">&#9650;</button>
+      <button id="btn-down" title="Go down a floor (PgDn / Q / Shift)">&#9660;</button>
+    </div>
+
+    <div id="hud-bottom" class="panel">
+      <span><b>&#8592;&#8593;&#8594;&#8595;</b> MOVE</span>
+      <span><b>PGUP</b> FLOOR UP</span>
+      <span><b>PGDN</b> FLOOR DOWN</span>
+      <span><b>C</b> VIEW</span>
+      <span><b>DRAG</b> CAMERA</span>
     </div>
   </div>
+  <div id="popups"></div>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

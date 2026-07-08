@@ -22,14 +22,23 @@ Then visit `http://localhost:8000` (or deploy to GitHub Pages — it works as-is
 
 | Input | Action |
 |---|---|
-| `W A S D` / Arrow keys | Move on the current floor (camera-relative) |
-| `E` / `Space` | Move up a floor (at a glowing shaft) |
-| `Q` / `Shift` | Move down a floor (at a glowing shaft) |
+| Arrow keys / `W A S D` | Move on the current floor (camera-relative) |
+| `PgUp` (or `E` / `Space`) | Go up a floor — sits right above the arrow keys |
+| `PgDn` (or `Q` / `Shift`) | Go down a floor |
+| On-screen `▲` / `▼` buttons | Same, for mouse or touch |
+| `C` | Toggle follow / top-down camera |
 | Mouse drag / wheel | Orbit and zoom the camera |
 | `Enter` | Start / restart |
 
-Cyan glowing columns mark the vertical shafts where you can change floors.
-Floors above and below you fade out so the current floor is always readable.
+Floor changes are **queued**: press `PgUp`/`PgDn` any time and Pac-Man rides the next
+shaft he crosses (the queue expires after a few seconds; the ▲/▼ button lights up while
+one is pending). One press moves exactly one floor.
+
+Cyan glowing columns mark the vertical shafts; they pulse when you're standing on one,
+with a `▲ PGUP / ▼ PGDN` prompt on screen. Each floor has its own color (teal / blue /
+violet). The floor you're on renders solid; the others keep bright wireframe outlines so
+you can always read the whole maze. A floor-stack widget on the right shows which floor
+you and each ghost are on.
 
 ## The ghosts — classic AI in 3D
 

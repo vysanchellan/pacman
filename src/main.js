@@ -1,25 +1,29 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
-  LAYERS, ROWS, COLS, cellAt, canStep, canMoveVertical, collectCells, GHOST_HOUSE,
+  LAYERS, ROWS, COLS, canStep, canMoveVertical, collectCells, GHOST_HOUSE,
 } from "./maze.js";
 import { GHOST_DEFS, pickTarget, chooseDirection, bfsDirection } from "./ghosts.js";
 import { sfx } from "./audio.js";
 
 // ---------------------------------------------------------------- constants
 const LAYER_H = 2.4; // world height between floors
-const PAC_SPEED = 3.6; // cells per second
+const PAC_SPEED = 3.8; // cells per second
 const GHOST_SPEED = 3.1;
 const FRIGHT_SPEED = 2.1;
 const EYES_SPEED = 7.0;
 const EXIT_SPEED = 2.4;
 const FRIGHT_TIME = 8.0;
 const FRIGHT_BLINK = 2.5;
+const PENDING_VERT_TTL = 6.0; // queued floor-change expires after this many seconds
 // scatter/chase wave schedule (seconds); last chase runs forever
 const WAVES = [
   ["scatter", 7], ["chase", 20], ["scatter", 7], ["chase", 20],
   ["scatter", 5], ["chase", 20], ["scatter", 5], ["chase", Infinity],
 ];
+
+// per-floor accent colors: bottom teal, middle classic blue, top violet
+const FLOOR_COLORS = [0x00c8e8, 0x3355ff, 0xb04dff];
 
 const cellToWorld = (l, r, c, out = new THREE.Vector3()) =>
   out.set(c - (COLS - 1) / 2, l * LAYER_H, r - (ROWS - 1) / 2);
@@ -27,10 +31,9 @@ const cellToWorld = (l, r, c, out = new THREE.Vector3()) =>
 // ---------------------------------------------------------------- three.js setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x02020a);
-scene.fog = new THREE.Fog(0x02020a, 22, 55);
+scene.fog = new THREE.Fog(0x02020a, 28, 75);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
-camera.position.set(0, LAYER_H * 2 + 9, 13);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -42,14 +45,14 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = false;
 controls.minDistance = 5;
-controls.maxDistance = 32;
+controls.maxDistance = 34;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-scene.add(new THREE.AmbientLight(0x8888aa, 0.7));
+scene.add(new THREE.AmbientLight(0x9090b8, 0.85));
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(8, 20, 6);
 scene.add(sun);
-const pacLight = new THREE.PointLight(0xffe000, 14, 9);
+const pacLight = new THREE.PointLight(0xffe000, 16, 10);
 scene.add(pacLight);
 
 addEventListener("resize", () => {
@@ -60,24 +63,26 @@ addEventListener("resize", () => {
 
 // ---------------------------------------------------------------- maze visuals
 const mazeData = collectCells();
-const layerWallMaterials = [];
+const wallFillMats = []; // solid fill per floor
+const wallEdgeMats = []; // glowing wireframe per floor
+const floorPlateMats = [];
 
 {
   const wallGeo = new THREE.BoxGeometry(1, 1.0, 1);
+  const edgeTemplate = new THREE.EdgesGeometry(wallGeo);
+  const v = new THREE.Vector3();
+
   for (let l = 0; l < LAYERS; l++) {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x1428c8,
-      emissive: 0x0a14aa,
-      emissiveIntensity: 0.55,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-    });
-    layerWallMaterials.push(mat);
+    const color = FLOOR_COLORS[l];
     const cellsHere = mazeData.walls.filter(([wl]) => wl === l);
-    const inst = new THREE.InstancedMesh(wallGeo, mat, cellsHere.length);
+
+    const fillMat = new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 0.25,
+      transparent: true, opacity: 0.85, depthWrite: false,
+    });
+    wallFillMats.push(fillMat);
+    const inst = new THREE.InstancedMesh(wallGeo, fillMat, cellsHere.length);
     const m = new THREE.Matrix4();
-    const v = new THREE.Vector3();
     cellsHere.forEach(([wl, r, c], i) => {
       cellToWorld(wl, r, c, v);
       m.makeTranslation(v.x, v.y, v.z);
@@ -86,31 +91,61 @@ const layerWallMaterials = [];
     inst.renderOrder = 1;
     scene.add(inst);
 
-    // faint floor plate under each layer
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(COLS, ROWS),
-      new THREE.MeshBasicMaterial({
-        color: 0x0a0a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
-      })
-    );
+    // merged wireframe of every wall block on this floor: stays readable
+    // even when the floor's solid fill is faded out
+    const src = edgeTemplate.attributes.position;
+    const positions = new Float32Array(src.count * 3 * cellsHere.length);
+    cellsHere.forEach(([wl, r, c], i) => {
+      cellToWorld(wl, r, c, v);
+      for (let j = 0; j < src.count; j++) {
+        const o = (i * src.count + j) * 3;
+        positions[o] = src.getX(j) + v.x;
+        positions[o + 1] = src.getY(j) + v.y;
+        positions[o + 2] = src.getZ(j) + v.z;
+      }
+    });
+    const edgeGeo = new THREE.BufferGeometry();
+    edgeGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const edgeMat = new THREE.LineBasicMaterial({
+      color, transparent: true, opacity: 1.0, depthWrite: false,
+    });
+    wallEdgeMats.push(edgeMat);
+    const lines = new THREE.LineSegments(edgeGeo, edgeMat);
+    lines.renderOrder = 2;
+    scene.add(lines);
+
+    // floor plate
+    const plateMat = new THREE.MeshBasicMaterial({
+      color: 0x0a0a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
+    });
+    floorPlateMats.push(plateMat);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), plateMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = l * LAYER_H - 0.55;
     scene.add(floor);
   }
+}
 
-  // vertical shaft beams: show where floors connect
-  const shaftMat = new THREE.MeshBasicMaterial({
-    color: 0x00ffcc, transparent: true, opacity: 0.14, depthWrite: false,
-  });
-  const shaftGeo = new THREE.CylinderGeometry(0.32, 0.32, LAYER_H, 12, 1, true);
+// vertical shaft beams — highlighted when Pac-Man can use them
+const shaftBeams = []; // { mesh, mat, lowLayer, r, c }
+{
+  const shaftGeo = new THREE.CylinderGeometry(0.34, 0.34, LAYER_H, 14, 1, true);
+  const seen = new Set();
   for (const [l, r, c] of mazeData.shafts) {
-    for (const nl of [l - 1, l + 1]) {
-      if (nl > l && canMoveVertical(l, nl, r, c)) {
-        const beam = new THREE.Mesh(shaftGeo, shaftMat);
-        cellToWorld(l, r, c, beam.position);
-        beam.position.y += LAYER_H / 2;
-        scene.add(beam);
-      }
+    for (const low of [l - 1, l]) {
+      const key = `${low},${r},${c}`;
+      if (low < 0 || seen.has(key)) continue;
+      if (!canMoveVertical(low, low + 1, r, c)) continue;
+      seen.add(key);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x00ffcc, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide,
+      });
+      const beam = new THREE.Mesh(shaftGeo, mat);
+      cellToWorld(low, r, c, beam.position);
+      beam.position.y += LAYER_H / 2;
+      beam.renderOrder = 3;
+      scene.add(beam);
+      shaftBeams.push({ mesh: beam, mat, lowLayer: low, r, c });
     }
   }
 
@@ -124,12 +159,19 @@ const layerWallMaterials = [];
   scene.add(door);
 }
 
-// pellets
+// pellets — one material per floor so off-floor dots can fade
 const pelletGeo = new THREE.SphereGeometry(0.09, 10, 8);
 const powerGeo = new THREE.SphereGeometry(0.24, 14, 12);
-const pelletMat = new THREE.MeshStandardMaterial({
-  color: 0xffd9a8, emissive: 0xffb060, emissiveIntensity: 0.7,
-});
+const pelletMatByFloor = [];
+const powerMatByFloor = [];
+for (let l = 0; l < LAYERS; l++) {
+  pelletMatByFloor.push(new THREE.MeshStandardMaterial({
+    color: 0xffd9a8, emissive: 0xffb060, emissiveIntensity: 0.7, transparent: true,
+  }));
+  powerMatByFloor.push(new THREE.MeshStandardMaterial({
+    color: 0xffd9a8, emissive: 0xffb060, emissiveIntensity: 0.9, transparent: true,
+  }));
+}
 const pelletKey = (l, r, c) => `${l},${r},${c}`;
 const pelletMeshes = new Map(); // key -> { mesh, power }
 const powerMeshes = [];
@@ -139,13 +181,13 @@ function spawnPellets() {
   pelletMeshes.clear();
   powerMeshes.length = 0;
   for (const [l, r, c] of mazeData.pellets) {
-    const mesh = new THREE.Mesh(pelletGeo, pelletMat);
+    const mesh = new THREE.Mesh(pelletGeo, pelletMatByFloor[l]);
     cellToWorld(l, r, c, mesh.position);
     scene.add(mesh);
     pelletMeshes.set(pelletKey(l, r, c), { mesh, power: false });
   }
   for (const [l, r, c] of mazeData.powerPellets) {
-    const mesh = new THREE.Mesh(powerGeo, pelletMat.clone());
+    const mesh = new THREE.Mesh(powerGeo, powerMatByFloor[l]);
     cellToWorld(l, r, c, mesh.position);
     scene.add(mesh);
     pelletMeshes.set(pelletKey(l, r, c), { mesh, power: true });
@@ -205,6 +247,7 @@ function segmentLength(dir) {
 
 const pac = {
   cell: null, dir: [0, 0, 0], desired: null, next: null, t: 0,
+  pendingVertical: null, pendingSetAt: 0,
   pos: new THREE.Vector3(), mouthPhase: 0, moving: false,
 };
 
@@ -249,7 +292,6 @@ function updateHud() {
   $("score").textContent = state.score;
   $("highscore").textContent = state.high;
   $("lives").innerHTML = "&#9679;".repeat(Math.max(0, state.lives)) || "&mdash;";
-  $("layer").textContent = `${(pac.cell ? pac.cell[0] : 1) + 1} / ${LAYERS}`;
 }
 function addScore(n) {
   state.score += n;
@@ -259,10 +301,52 @@ function addScore(n) {
   }
 }
 
+// floating score popup at a world position
+function popup(text, worldPos, color = "#66ccff") {
+  const v = worldPos.clone().project(camera);
+  if (v.z > 1) return;
+  const el = document.createElement("div");
+  el.className = "popup";
+  el.textContent = text;
+  el.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
+  el.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
+  el.style.color = color;
+  $("popups").appendChild(el);
+  setTimeout(() => el.remove(), 950);
+}
+
+// ---------------------------------------------------------------- floor stack widget
+const floorStackEl = $("floor-stack");
+let floorStackSig = "";
+
+function updateFloorStack() {
+  const pl = pac.cell ? pac.cell[0] : 1;
+  const ghostFloors = ghosts.map((g) =>
+    g.state === "house" || g.state === "entering" ? -1 : g.cell[0]);
+  const sig = `${pl}|${ghostFloors.join(",")}`;
+  if (sig === floorStackSig) return;
+  floorStackSig = sig;
+
+  let html = `<div class="fs-title">FLOORS</div>`;
+  for (let l = LAYERS - 1; l >= 0; l--) {
+    const dots = [`${pl === l ? '<span class="dot pac"></span>' : ""}`];
+    ghosts.forEach((g, i) => {
+      if (ghostFloors[i] === l) {
+        const col = `#${g.color.toString(16).padStart(6, "0")}`;
+        dots.push(`<span class="dot" style="background:${col};box-shadow:0 0 5px ${col}"></span>`);
+      }
+    });
+    html += `<div class="floor-row${pl === l ? " active" : ""}">
+      <span class="fl">${l + 1}</span>${dots.join("")}</div>`;
+  }
+  floorStackEl.innerHTML = html;
+}
+
 function resetPositions() {
   pac.cell = [...mazeData.pacmanSpawn];
   pac.dir = [0, 0, 0];
   pac.desired = null;
+  pac.pendingVertical = null;
   pac.next = null;
   pac.t = 0;
   pac.moving = false;
@@ -306,10 +390,16 @@ function newGame() {
 }
 
 // ---------------------------------------------------------------- input
-const keyState = {};
+// Horizontal steering and floor changes are tracked separately, so holding an
+// arrow key (with OS auto-repeat) can never stomp on a queued up/down press.
+function queueVertical(dl) {
+  pac.pendingVertical = [dl, 0, 0];
+  pac.pendingSetAt = state.elapsed;
+}
+
 addEventListener("keydown", (e) => {
-  keyState[e.code] = true;
   sfx.unlock();
+  if (e.repeat) return; // ignore OS key auto-repeat entirely
 
   if (e.code === "Enter") {
     if (state.phase === "menu" || state.phase === "gameover" || state.phase === "win") {
@@ -317,22 +407,37 @@ addEventListener("keydown", (e) => {
     }
     return;
   }
+  if (e.code === "KeyC") {
+    toggleCameraPreset();
+    return;
+  }
   if (state.phase !== "playing" && state.phase !== "ready") return;
 
-  const dir = keyToDir(e.code);
+  switch (e.code) {
+    case "PageUp": case "KeyE": case "Space":
+      queueVertical(1);
+      e.preventDefault();
+      return;
+    case "PageDown": case "KeyQ": case "ShiftLeft": case "ShiftRight":
+      queueVertical(-1);
+      e.preventDefault();
+      return;
+  }
+
+  const dir = horizontalKeyToDir(e.code);
   if (dir) {
     pac.desired = dir;
     e.preventDefault();
   }
 });
-addEventListener("keyup", (e) => { keyState[e.code] = false; });
+
+// on-screen floor buttons (mouse / touch)
+$("btn-up").addEventListener("pointerdown", () => { sfx.unlock(); queueVertical(1); });
+$("btn-down").addEventListener("pointerdown", () => { sfx.unlock(); queueVertical(-1); });
 
 // Horizontal input is camera-relative: "up" means away from the camera,
 // snapped to the nearest maze axis, so steering stays intuitive while orbiting.
-function keyToDir(code) {
-  if (code === "KeyE" || code === "Space") return [1, 0, 0];
-  if (code === "KeyQ" || code === "ShiftLeft" || code === "ShiftRight") return [-1, 0, 0];
-
+function horizontalKeyToDir(code) {
   const fwd = new THREE.Vector3();
   camera.getWorldDirection(fwd);
   fwd.y = 0;
@@ -354,41 +459,76 @@ function keyToDir(code) {
   return null;
 }
 
+// ---------------------------------------------------------------- camera presets
+// C toggles between a follow view and a top-down tactical view; free orbit
+// stays available in both.
+let camMode = 0;
+let camTween = null;
+const CAM_OFFSETS = [
+  new THREE.Vector3(0, 10.5, 9.5), // follow: ~48° over the shoulder
+  new THREE.Vector3(0, 16.5, 0.02), // top-down
+];
+
+function toggleCameraPreset() {
+  camMode = (camMode + 1) % CAM_OFFSETS.length;
+  camTween = {
+    from: camera.position.clone(),
+    to: controls.target.clone().add(CAM_OFFSETS[camMode]),
+    t: 0,
+  };
+}
+
 // ---------------------------------------------------------------- pac-man update
+function tryBeginSegment() {
+  const candidates = [];
+  if (pac.pendingVertical) candidates.push(pac.pendingVertical);
+  if (pac.desired) candidates.push(pac.desired);
+  // only horizontal movement auto-continues: floor changes are one press = one floor
+  if (pac.dir && (pac.dir[1] || pac.dir[2])) candidates.push(pac.dir);
+  for (const d of candidates) {
+    if (!canStep(...pac.cell, d)) continue;
+    if (d === pac.pendingVertical) pac.pendingVertical = null;
+    pac.dir = d;
+    pac.next = [pac.cell[0] + d[0], pac.cell[1] + d[1], pac.cell[2] + d[2]];
+    pac.t = 0;
+    pac.moving = true;
+    return true;
+  }
+  return false;
+}
+
 function updatePac(dt) {
-  const speed = PAC_SPEED;
+  // expire stale queued floor-changes
+  if (pac.pendingVertical && state.elapsed - pac.pendingSetAt > PENDING_VERT_TTL) {
+    pac.pendingVertical = null;
+  }
 
   if (!pac.moving) {
-    // try to start moving toward desired (or keep last direction)
-    const tryDirs = [pac.desired, pac.dir].filter(Boolean);
-    for (const d of tryDirs) {
-      if ((d[0] || d[1] || d[2]) && canStep(...pac.cell, d)) {
-        pac.dir = d;
-        pac.next = [pac.cell[0] + d[0], pac.cell[1] + d[1], pac.cell[2] + d[2]];
-        pac.t = 0;
-        pac.moving = true;
-        break;
-      }
-    }
+    tryBeginSegment();
   } else {
-    // mid-segment reversal
-    if (pac.desired && pac.dir &&
-        pac.desired[0] === -pac.dir[0] && pac.desired[1] === -pac.dir[1] && pac.desired[2] === -pac.dir[2]) {
-      const tmp = pac.cell;
-      pac.cell = pac.next;
-      pac.next = tmp;
+    // mid-segment reversal: vertical rides reverse on the opposite floor key,
+    // horizontal runs reverse on the opposite arrow
+    const rev = (d) => d &&
+      d[0] === -pac.dir[0] && d[1] === -pac.dir[1] && d[2] === -pac.dir[2];
+    if (pac.dir[0] !== 0 && rev(pac.pendingVertical)) {
+      [pac.cell, pac.next] = [pac.next, pac.cell];
+      pac.t = 1 - pac.t;
+      pac.dir = pac.pendingVertical;
+      pac.pendingVertical = null;
+    } else if (pac.dir[0] === 0 && rev(pac.desired)) {
+      [pac.cell, pac.next] = [pac.next, pac.cell];
       pac.t = 1 - pac.t;
       pac.dir = pac.desired;
     }
-    pac.t += (speed * dt) / segmentLength(pac.dir);
+
+    pac.t += (PAC_SPEED * dt) / segmentLength(pac.dir);
     if (pac.t >= 1) {
       pac.cell = pac.next;
       pac.moving = false;
       pac.t = 0;
       if (pac.dir[0] !== 0) sfx.layerShift();
       eatAt(pac.cell);
-      // immediately chain into next segment: prefer desired, else continue
-      updatePac(0);
+      tryBeginSegment(); // chain straight into the next segment
     }
   }
 
@@ -601,7 +741,9 @@ function checkCollisions() {
       g.state = "eyes";
       g.next = null;
       state.eatChain = Math.min(state.eatChain + 1, 4);
-      addScore(100 * 2 ** state.eatChain); // 200 / 400 / 800 / 1600
+      const pts = 100 * 2 ** state.eatChain; // 200 / 400 / 800 / 1600
+      addScore(pts);
+      popup(`+${pts}`, g.pos, "#66ccff");
       sfx.eatGhost();
       updateHud();
     } else {
@@ -614,14 +756,59 @@ function checkCollisions() {
   }
 }
 
-// ---------------------------------------------------------------- wall fading
-// Floors above/below Pac-Man fade out so you can always see where you are.
-function updateLayerVisibility() {
+// ---------------------------------------------------------------- visibility
+// The current floor renders solid; other floors keep bright wireframes (so the
+// maze structure always reads) but fade their fill, plates, and pellets.
+function updateVisibility() {
   const pl = pac.cell ? pac.cell[0] : 1;
   for (let l = 0; l < LAYERS; l++) {
     const d = Math.abs(l - pl);
-    layerWallMaterials[l].opacity = d === 0 ? 0.92 : d === 1 ? 0.22 : 0.07;
-    layerWallMaterials[l].emissiveIntensity = d === 0 ? 0.6 : 0.15;
+    wallFillMats[l].opacity = d === 0 ? 0.85 : d === 1 ? 0.10 : 0.05;
+    wallEdgeMats[l].opacity = d === 0 ? 1.0 : d === 1 ? 0.5 : 0.22;
+    floorPlateMats[l].opacity = d === 0 ? 0.4 : 0.12;
+    pelletMatByFloor[l].opacity = d === 0 ? 1.0 : d === 1 ? 0.35 : 0.15;
+    powerMatByFloor[l].opacity = d === 0 ? 1.0 : d === 1 ? 0.5 : 0.25;
+  }
+
+  // shaft beams: glow when Pac-Man is standing where they can be used
+  const [cl, cr, cc] = pac.cell || [1, 0, 0];
+  let canUp = false;
+  let canDown = false;
+  for (const b of shaftBeams) {
+    const usable = !pac.moving && b.r === cr && b.c === cc &&
+      (b.lowLayer === cl || b.lowLayer + 1 === cl);
+    if (usable) {
+      if (b.lowLayer === cl) canUp = true;
+      if (b.lowLayer + 1 === cl) canDown = true;
+      b.mat.opacity = 0.4 + Math.sin(state.elapsed * 8) * 0.15;
+    } else {
+      b.mat.opacity = 0.18;
+    }
+  }
+
+  // shaft hint + queued indicator
+  const hint = $("shaft-hint");
+  if (state.phase === "playing" && (canUp || canDown)) {
+    hint.textContent =
+      `${canUp ? "▲ PGUP  " : ""}${canDown ? "▼ PGDN" : ""}`.trim();
+    hint.classList.add("on");
+  } else if (state.phase === "playing" && pac.pendingVertical) {
+    hint.textContent = pac.pendingVertical[0] > 0 ? "▲ QUEUED" : "▼ QUEUED";
+    hint.classList.add("on");
+  } else {
+    hint.classList.remove("on");
+  }
+  $("btn-up").classList.toggle("queued", !!pac.pendingVertical && pac.pendingVertical[0] > 0);
+  $("btn-down").classList.toggle("queued", !!pac.pendingVertical && pac.pendingVertical[0] < 0);
+
+  // frightened timer bar
+  const wrap = $("fright-wrap");
+  if (state.frightTimer > 0) {
+    wrap.classList.add("on");
+    wrap.classList.toggle("blink", state.frightTimer < FRIGHT_BLINK);
+    $("fright-bar").style.width = `${(state.frightTimer / FRIGHT_TIME) * 100}%`;
+  } else {
+    wrap.classList.remove("on", "blink");
   }
 }
 
@@ -671,7 +858,6 @@ function tick(now) {
       updatePac(dt);
       for (const g of ghosts) updateGhost(g, dt);
       checkCollisions();
-      updateHud();
       break;
     }
 
@@ -705,11 +891,19 @@ function tick(now) {
       break;
   }
 
-  updateLayerVisibility();
+  updateVisibility();
+  updateFloorStack();
 
-  // camera follows pac-man smoothly
+  // camera: preset tween, then smooth follow
+  if (camTween) {
+    camTween.t += dt * 2.2;
+    const k = Math.min(camTween.t, 1);
+    const s = k * k * (3 - 2 * k); // smoothstep
+    camera.position.lerpVectors(camTween.from, camTween.to, s);
+    if (k >= 1) camTween = null;
+  }
   const targetPos = pac.cell ? pac.pos : new THREE.Vector3(0, LAYER_H, 0);
-  const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 4));
+  const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 5));
   controls.target.add(delta);
   camera.position.add(delta);
   controls.update();
@@ -721,7 +915,10 @@ function tick(now) {
 spawnPellets();
 state.pelletsLeft = pelletMeshes.size;
 resetPositions();
+controls.target.copy(pac.pos);
+camera.position.copy(pac.pos).add(CAM_OFFSETS[0]);
 updateHud();
+updateFloorStack();
 setMessage("PAC-MAN 3D", "PRESS ENTER TO START");
 requestAnimationFrame(tick);
 
