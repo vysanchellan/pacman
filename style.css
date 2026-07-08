@@ -306,6 +306,66 @@ canvas {
   box-shadow: 0 0 16px rgba(255, 212, 71, 0.55);
 }
 
+/* ---------------- compass (bottom-left) ---------------- */
+#compass {
+  position: absolute;
+  left: 18px;
+  bottom: 64px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#compass-rose {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.12s linear;
+}
+
+.c-mark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.c-n { transform: translate(-50%, -50%) translateY(-34px); color: var(--pink); text-shadow: 0 0 8px rgba(255,143,200,0.8); }
+.c-e { transform: translate(-50%, -50%) translateX(34px); }
+.c-s { transform: translate(-50%, -50%) translateY(34px); }
+.c-w { transform: translate(-50%, -50%) translateX(-34px); }
+
+#compass-needle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 22px solid var(--accent);
+  transform-origin: 50% 100%;
+  transform: translate(-50%, -100%) rotate(0deg);
+  filter: drop-shadow(0 0 6px rgba(255, 212, 71, 0.8));
+  transition: transform 0.12s linear, opacity 0.2s;
+}
+
+#compass-needle.idle { opacity: 0.2; }
+
+#compass-up {
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  transform: translateX(-50%);
+  color: #4dffdf;
+  font-size: 11px;
+  text-shadow: 0 0 6px rgba(77, 255, 223, 0.8);
+}
+
 /* ---------------- bottom help ---------------- */
 #hud-bottom {
   position: absolute;
