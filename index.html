@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PAC-MAN 3D</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <div id="hud-top">
+      <div class="hud-block">
+        <span class="hud-label">SCORE</span>
+        <span id="score">0</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">HIGH</span>
+        <span id="highscore">0</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">LIVES</span>
+        <span id="lives">&#9679;&#9679;</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">FLOOR</span>
+        <span id="layer">2 / 3</span>
+      </div>
+    </div>
+    <div id="message"></div>
+    <div id="hud-bottom">
+      <span>MOVE: WASD / ARROWS</span>
+      <span>UP FLOOR: E / SPACE</span>
+      <span>DOWN FLOOR: Q / SHIFT</span>
+      <span>CAMERA: MOUSE DRAG</span>
+    </div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

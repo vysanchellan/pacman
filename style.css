@@ -1,0 +1,93 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: "Courier New", monospace;
+}
+
+canvas {
+  display: block;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  z-index: 10;
+}
+
+#hud-top {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  padding: 16px;
+  text-shadow: 0 0 8px rgba(255, 255, 0, 0.6);
+}
+
+.hud-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-label {
+  color: #888;
+  font-size: 12px;
+  letter-spacing: 3px;
+}
+
+#score, #highscore, #layer {
+  color: #ffe000;
+  font-size: 26px;
+  font-weight: bold;
+}
+
+#lives {
+  color: #ffe000;
+  font-size: 26px;
+  letter-spacing: 6px;
+}
+
+#message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #ffe000;
+  font-size: 42px;
+  font-weight: bold;
+  letter-spacing: 8px;
+  text-align: center;
+  text-shadow: 0 0 20px rgba(255, 224, 0, 0.8);
+  white-space: pre-line;
+}
+
+#message .sub {
+  display: block;
+  margin-top: 12px;
+  font-size: 18px;
+  color: #aaa;
+  letter-spacing: 3px;
+  text-shadow: none;
+}
+
+#hud-bottom {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  padding: 12px;
+  color: #556;
+  font-size: 11px;
+  letter-spacing: 2px;
+}
