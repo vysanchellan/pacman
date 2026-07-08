@@ -28,6 +28,10 @@ Then visit `http://localhost:8000` (or deploy to GitHub Pages — it works as-is
 | On-screen `▲` / `▼` buttons | Same, for mouse or touch |
 | `C` | Toggle follow / top-down camera |
 | Mouse drag / wheel | Orbit and zoom the camera |
+
+In follow mode the camera automatically swings around to stay behind Pac-Man's heading;
+dragging the mouse pauses the auto-rotate for a couple of seconds so you can look around.
+Floor changes glide with an ease-in-out, and the floor fade crossfades during the ride.
 | `Enter` | Start / restart |
 
 Floor changes are **queued**: press `PgUp`/`PgDn` any time and Pac-Man rides the next

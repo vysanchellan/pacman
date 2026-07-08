@@ -249,7 +249,11 @@ const pac = {
   cell: null, dir: [0, 0, 0], desired: null, next: null, t: 0,
   pendingVertical: null, pendingSetAt: 0,
   pos: new THREE.Vector3(), mouthPhase: 0, moving: false,
+  lastHorizWorld: null, // last horizontal heading in world space (for camera)
 };
+
+// ease-in-out used for vertical rides and camera blends
+const smooth = (t) => t * t * (3 - 2 * t);
 
 const ghosts = GHOST_DEFS.map((def, i) => {
   const vis = makeGhostMesh(def.color);
@@ -399,6 +403,8 @@ function queueVertical(dl) {
 
 addEventListener("keydown", (e) => {
   sfx.unlock();
+  // stop page scroll / focused-button activation before anything else
+  if (e.code === "Space" || e.code === "PageUp" || e.code === "PageDown") e.preventDefault();
   if (e.repeat) return; // ignore OS key auto-repeat entirely
 
   if (e.code === "Enter") {
@@ -431,9 +437,18 @@ addEventListener("keydown", (e) => {
   }
 });
 
-// on-screen floor buttons (mouse / touch)
-$("btn-up").addEventListener("pointerdown", () => { sfx.unlock(); queueVertical(1); });
-$("btn-down").addEventListener("pointerdown", () => { sfx.unlock(); queueVertical(-1); });
+// on-screen floor buttons (mouse / touch). preventDefault stops the button
+// from taking focus — a focused button would swallow Space/Enter presses.
+for (const [id, dl] of [["btn-up", 1], ["btn-down", -1]]) {
+  const el = $(id);
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    sfx.unlock();
+    queueVertical(dl);
+  });
+  el.addEventListener("click", (e) => e.preventDefault());
+  el.addEventListener("focus", () => el.blur());
+}
 
 // Horizontal input is camera-relative: "up" means away from the camera,
 // snapped to the nearest maze axis, so steering stays intuitive while orbiting.
@@ -476,6 +491,30 @@ function toggleCameraPreset() {
     to: controls.target.clone().add(CAM_OFFSETS[camMode]),
     t: 0,
   };
+}
+
+// In follow mode the camera swings around to stay behind Pac-Man's heading.
+// Manual orbiting pauses the auto-rotate briefly so the player can look around.
+let userOrbiting = false;
+let orbitCooldown = 0;
+controls.addEventListener("start", () => { userOrbiting = true; });
+controls.addEventListener("end", () => { userOrbiting = false; orbitCooldown = 2.5; });
+
+function autoRotateCamera(dt) {
+  if (camMode !== 0 || camTween || userOrbiting) return;
+  if (orbitCooldown > 0) { orbitCooldown -= dt; return; }
+  if (state.phase !== "playing" || !pac.lastHorizWorld) return;
+
+  const offset = camera.position.clone().sub(controls.target);
+  const sph = new THREE.Spherical().setFromVector3(offset);
+  // camera sits behind pac: offset direction is the opposite of his heading
+  const desired = Math.atan2(-pac.lastHorizWorld.x, -pac.lastHorizWorld.z);
+  let dTheta = desired - sph.theta;
+  while (dTheta > Math.PI) dTheta -= Math.PI * 2;
+  while (dTheta < -Math.PI) dTheta += Math.PI * 2;
+  sph.theta += dTheta * Math.min(1, dt * 1.6);
+  offset.setFromSpherical(sph);
+  camera.position.copy(controls.target).add(offset);
 }
 
 // ---------------------------------------------------------------- pac-man update
@@ -532,11 +571,14 @@ function updatePac(dt) {
     }
   }
 
-  // world position
+  // world position — vertical rides get an ease-in-out so floor changes glide
   const a = cellToWorld(...pac.cell, new THREE.Vector3());
   if (pac.moving) {
     const b = cellToWorld(...pac.next, new THREE.Vector3());
-    pac.pos.lerpVectors(a, b, pac.t);
+    pac.pos.lerpVectors(a, b, pac.dir[0] !== 0 ? smooth(pac.t) : pac.t);
+    if (pac.dir[0] === 0) {
+      pac.lastHorizWorld = new THREE.Vector3(pac.dir[2], 0, pac.dir[1]);
+    }
   } else {
     pac.pos.copy(a);
   }
@@ -676,11 +718,11 @@ function updateGhost(g, dt) {
     stepGhostNormally(g, dt, speed, target, g.frightened);
   }
 
-  // world position
+  // world position — same vertical easing as Pac-Man
   const a = cellToWorld(...g.cell, new THREE.Vector3());
   if (g.next) {
     const b = cellToWorld(...g.next, new THREE.Vector3());
-    g.pos.lerpVectors(a, b, g.t);
+    g.pos.lerpVectors(a, b, g.next[0] !== g.cell[0] ? smooth(g.t) : g.t);
   } else {
     g.pos.copy(a);
   }
@@ -760,14 +802,21 @@ function checkCollisions() {
 // The current floor renders solid; other floors keep bright wireframes (so the
 // maze structure always reads) but fade their fill, plates, and pellets.
 function updateVisibility() {
-  const pl = pac.cell ? pac.cell[0] : 1;
+  // fractional floor from Pac-Man's actual height, so opacities crossfade
+  // continuously during a shaft ride instead of snapping at the end
+  const fl = pac.pos.y / LAYER_H;
+  const at = (vals, d) => {
+    const i = Math.min(Math.floor(d), vals.length - 2);
+    const f = Math.min(Math.max(d - i, 0), 1);
+    return vals[i] + (vals[i + 1] - vals[i]) * f;
+  };
   for (let l = 0; l < LAYERS; l++) {
-    const d = Math.abs(l - pl);
-    wallFillMats[l].opacity = d === 0 ? 0.85 : d === 1 ? 0.10 : 0.05;
-    wallEdgeMats[l].opacity = d === 0 ? 1.0 : d === 1 ? 0.5 : 0.22;
-    floorPlateMats[l].opacity = d === 0 ? 0.4 : 0.12;
-    pelletMatByFloor[l].opacity = d === 0 ? 1.0 : d === 1 ? 0.35 : 0.15;
-    powerMatByFloor[l].opacity = d === 0 ? 1.0 : d === 1 ? 0.5 : 0.25;
+    const d = Math.min(Math.abs(l - fl), 2);
+    wallFillMats[l].opacity = at([0.85, 0.10, 0.05], d);
+    wallEdgeMats[l].opacity = at([1.0, 0.5, 0.22], d);
+    floorPlateMats[l].opacity = at([0.4, 0.12, 0.12], d);
+    pelletMatByFloor[l].opacity = at([1.0, 0.35, 0.15], d);
+    powerMatByFloor[l].opacity = at([1.0, 0.5, 0.25], d);
   }
 
   // shaft beams: glow when Pac-Man is standing where they can be used
@@ -906,6 +955,7 @@ function tick(now) {
   const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 5));
   controls.target.add(delta);
   camera.position.add(delta);
+  autoRotateCamera(dt);
   controls.update();
 
   renderer.render(scene, camera);
@@ -924,6 +974,6 @@ requestAnimationFrame(tick);
 
 // debug/test hook: lets automated tests drive frames when rAF is throttled
 window.__pacman3d = {
-  state, pac, ghosts,
+  state, pac, ghosts, camera, controls,
   step(ms) { lastTime = performance.now() - ms; tick(performance.now()); },
 };
