@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import {
   LAYERS, ROWS, COLS, canStep, canMoveVertical, collectCells, GHOST_HOUSE,
 } from "./maze.js";
@@ -22,23 +25,37 @@ const WAVES = [
   ["scatter", 5], ["chase", 20], ["scatter", 5], ["chase", Infinity],
 ];
 
-// per-floor accent colors: bottom teal, middle classic blue, top violet
-const FLOOR_COLORS = [0x00c8e8, 0x3355ff, 0xb04dff];
+// per-floor accent colors: bottom teal, middle blue, top violet
+const FLOOR_COLORS = [0x2dd6c8, 0x4d6bff, 0xb36bff];
+
+// anime iris color per ghost
+const IRIS_COLORS = { blinky: 0xff3355, pinky: 0xff66aa, inky: 0x33ddff, clyde: 0xffaa33 };
+
+const OUTLINE_COLOR = 0x140a24;
 
 const cellToWorld = (l, r, c, out = new THREE.Vector3()) =>
   out.set(c - (COLS - 1) / 2, l * LAYER_H, r - (ROWS - 1) / 2);
 
+// ease-in-out used for vertical rides and camera blends
+const smooth = (t) => t * t * (3 - 2 * t);
+
 // ---------------------------------------------------------------- three.js setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x02020a);
-scene.fog = new THREE.Fog(0x02020a, 28, 75);
+scene.background = new THREE.Color(0x070312);
+scene.fog = new THREE.Fog(0x070312, 30, 80);
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 220);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
+
+// soft anime-glow post-processing
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.55, 0.8);
+composer.addPass(bloom);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -48,18 +65,83 @@ controls.minDistance = 5;
 controls.maxDistance = 34;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-scene.add(new THREE.AmbientLight(0x9090b8, 0.85));
-const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+scene.add(new THREE.HemisphereLight(0x8f9dff, 0x2a1440, 0.85));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.0);
 sun.position.set(8, 20, 6);
 scene.add(sun);
-const pacLight = new THREE.PointLight(0xffe000, 16, 10);
+const pacLight = new THREE.PointLight(0xffe000, 14, 10);
 scene.add(pacLight);
 
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
 });
+
+// 3-step gradient for cel (toon) shading
+const gradientMap = (() => {
+  const data = new Uint8Array([90, 90, 90, 255, 175, 175, 175, 255, 255, 255, 255, 255]);
+  const tex = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return tex;
+})();
+const toonMat = (color, opts = {}) =>
+  new THREE.MeshToonMaterial({ color, gradientMap, ...opts });
+// inverted-hull outline for that inked anime look
+function addOutline(mesh, scale = 1.07) {
+  const outline = new THREE.Mesh(
+    mesh.geometry,
+    new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide })
+  );
+  outline.position.copy(mesh.position);
+  outline.rotation.copy(mesh.rotation);
+  outline.scale.copy(mesh.scale).multiplyScalar(scale);
+  mesh.parent ? mesh.parent.add(outline) : null;
+  return outline;
+}
+
+// ---------------------------------------------------------------- ambience
+// starfield + drifting sakura petals
+{
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(400 * 3);
+  for (let i = 0; i < 400; i++) {
+    const v = new THREE.Vector3().randomDirection().multiplyScalar(60 + Math.random() * 40);
+    v.y = Math.abs(v.y) * 0.6 - 5;
+    starPos.set([v.x, v.y, v.z], i * 3);
+  }
+  starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+    color: 0x9aa8ff, size: 0.35, transparent: true, opacity: 0.8, sizeAttenuation: true,
+  })));
+}
+
+const PETALS = 140;
+const petalGeo = new THREE.BufferGeometry();
+const petalPos = new Float32Array(PETALS * 3);
+const petalSeed = new Float32Array(PETALS);
+for (let i = 0; i < PETALS; i++) {
+  petalPos.set([(Math.random() - 0.5) * 26, Math.random() * 9 - 1, (Math.random() - 0.5) * 26], i * 3);
+  petalSeed[i] = Math.random() * Math.PI * 2;
+}
+petalGeo.setAttribute("position", new THREE.BufferAttribute(petalPos, 3));
+const petals = new THREE.Points(petalGeo, new THREE.PointsMaterial({
+  color: 0xffa8d4, size: 0.14, transparent: true, opacity: 0.75, sizeAttenuation: true,
+}));
+scene.add(petals);
+
+function updatePetals(dt, elapsed) {
+  const p = petalGeo.attributes.position;
+  for (let i = 0; i < PETALS; i++) {
+    let y = p.getY(i) - dt * (0.35 + 0.15 * Math.sin(petalSeed[i]));
+    if (y < -1.2) y = 8;
+    p.setY(i, y);
+    p.setX(i, p.getX(i) + Math.sin(elapsed * 0.8 + petalSeed[i]) * dt * 0.4);
+  }
+  p.needsUpdate = true;
+}
 
 // ---------------------------------------------------------------- maze visuals
 const mazeData = collectCells();
@@ -77,8 +159,8 @@ const floorPlateMats = [];
     const cellsHere = mazeData.walls.filter(([wl]) => wl === l);
 
     const fillMat = new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 0.25,
-      transparent: true, opacity: 0.85, depthWrite: false,
+      color, emissive: color, emissiveIntensity: 0.22,
+      transparent: true, opacity: 0.8, depthWrite: false,
     });
     wallFillMats.push(fillMat);
     const inst = new THREE.InstancedMesh(wallGeo, fillMat, cellsHere.length);
@@ -116,7 +198,7 @@ const floorPlateMats = [];
 
     // floor plate
     const plateMat = new THREE.MeshBasicMaterial({
-      color: 0x0a0a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
+      color: 0x0d0724, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
     });
     floorPlateMats.push(plateMat);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), plateMat);
@@ -138,7 +220,7 @@ const shaftBeams = []; // { mesh, mat, lowLayer, r, c }
       if (!canMoveVertical(low, low + 1, r, c)) continue;
       seen.add(key);
       const mat = new THREE.MeshBasicMaterial({
-        color: 0x00ffcc, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide,
+        color: 0x4dffdf, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide,
       });
       const beam = new THREE.Mesh(shaftGeo, mat);
       cellToWorld(low, r, c, beam.position);
@@ -166,10 +248,10 @@ const pelletMatByFloor = [];
 const powerMatByFloor = [];
 for (let l = 0; l < LAYERS; l++) {
   pelletMatByFloor.push(new THREE.MeshStandardMaterial({
-    color: 0xffd9a8, emissive: 0xffb060, emissiveIntensity: 0.7, transparent: true,
+    color: 0xffe2b8, emissive: 0xffb060, emissiveIntensity: 0.9, transparent: true,
   }));
   powerMatByFloor.push(new THREE.MeshStandardMaterial({
-    color: 0xffd9a8, emissive: 0xffb060, emissiveIntensity: 0.9, transparent: true,
+    color: 0xffe2b8, emissive: 0xff9040, emissiveIntensity: 1.4, transparent: true,
   }));
 }
 const pelletKey = (l, r, c) => `${l},${r},${c}`;
@@ -196,48 +278,102 @@ function spawnPellets() {
 }
 
 // ---------------------------------------------------------------- pac-man visual
+// chibi anime style: cel-shaded chomping ball, inked outline, big sparkly
+// eyes and blush marks — the mouth still opens along +X for aiming
 const PAC_R = 0.42;
 const mouthGeos = [];
 for (let i = 0; i < 7; i++) {
   const mouth = (i / 6) * 0.9; // radians of half-mouth opening
   const g = new THREE.SphereGeometry(PAC_R, 28, 20, mouth, Math.PI * 2 - 2 * mouth);
-  g.rotateZ(Math.PI / 2); // mouth opens along +X so quaternion aiming works
+  g.rotateZ(Math.PI / 2);
   mouthGeos.push(g);
 }
-const pacMesh = new THREE.Mesh(
+const pacGroup = new THREE.Group();
+const pacBody = new THREE.Mesh(mouthGeos[3], toonMat(0xffdd33));
+const pacOutline = new THREE.Mesh(
   mouthGeos[3],
-  new THREE.MeshStandardMaterial({ color: 0xffe000, emissive: 0x665500, roughness: 0.35 })
+  new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide })
 );
-scene.add(pacMesh);
+pacOutline.scale.setScalar(1.07);
+pacGroup.add(pacBody, pacOutline);
+
+for (const side of [-1, 1]) {
+  const white = new THREE.Mesh(new THREE.SphereGeometry(0.105, 14, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  white.position.set(0.26, 0.24, side * 0.17);
+  white.scale.set(0.7, 1.25, 1);
+  const iris = new THREE.Mesh(new THREE.SphereGeometry(0.062, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0x3a2410 }));
+  iris.position.set(0.32, 0.24, side * 0.17);
+  iris.scale.set(0.6, 1.25, 1);
+  const spark = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  spark.position.set(0.36, 0.28, side * 0.15);
+  const blush = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffa07a, transparent: true, opacity: 0.85 }));
+  blush.position.set(0.24, 0.02, side * 0.33);
+  blush.scale.set(0.5, 0.7, 1.1);
+  pacGroup.add(white, iris, spark, blush);
+}
+scene.add(pacGroup);
 
 // ---------------------------------------------------------------- ghost visuals
-function makeGhostMesh(color) {
+// anime spirits: cel-shaded body with a wavy skirt, inked outline, big
+// colored irises with highlights, gentle floating bob
+function makeGhostMesh(color, name) {
   const group = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4 });
+  const bodyMat = toonMat(color);
   const body = new THREE.Group();
+
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.4, 0.42, 20), bodyMat);
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(0.36, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat);
   dome.position.y = 0.21;
-  trunk.position.y = 0;
-  body.add(trunk, dome);
-  body.position.y = -0.05;
+
+  const skirtGeo = new THREE.CylinderGeometry(0.40, 0.47, 0.2, 24, 1, true);
+  const sp = skirtGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) {
+    if (sp.getY(i) < 0) {
+      const ang = Math.atan2(sp.getZ(i), sp.getX(i));
+      sp.setY(i, sp.getY(i) + Math.sin(ang * 6) * 0.05);
+    }
+  }
+  const skirt = new THREE.Mesh(skirtGeo, bodyMat.clone());
+  skirt.material.side = THREE.DoubleSide;
+  skirt.position.y = -0.26;
+
+  body.add(trunk, dome, skirt);
+  body.position.y = -0.02;
+  for (const mesh of [trunk, dome]) {
+    body.add((() => {
+      const o = new THREE.Mesh(mesh.geometry,
+        new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide }));
+      o.position.copy(mesh.position);
+      o.scale.setScalar(1.08);
+      return o;
+    })());
+  }
   group.add(body);
 
   const eyes = new THREE.Group();
+  const irisMats = [];
   for (const side of [-1, 1]) {
-    const white = new THREE.Mesh(
-      new THREE.SphereGeometry(0.11, 12, 10),
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 12),
       new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    white.position.set(side * 0.15, 0.18, 0.28);
-    const pupil = new THREE.Mesh(
-      new THREE.SphereGeometry(0.055, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0x2222cc }));
-    pupil.position.set(side * 0.15, 0.18, 0.37);
-    eyes.add(white, pupil);
+    white.position.set(side * 0.15, 0.2, 0.29);
+    white.scale.set(1, 1.3, 0.55);
+    const irisMat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
+    irisMats.push(irisMat);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.062, 12, 10), irisMat);
+    iris.position.set(side * 0.15, 0.19, 0.365);
+    iris.scale.set(1, 1.35, 0.6);
+    const spark = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    spark.position.set(side * 0.12, 0.25, 0.41);
+    eyes.add(white, iris, spark);
   }
   group.add(eyes);
-  return { group, body, bodyMat, eyes };
+  return { group, body, bodyMat, skirtMat: skirt.material, eyes, irisMats };
 }
 
 // ---------------------------------------------------------------- entities
@@ -252,11 +388,8 @@ const pac = {
   lastHorizWorld: null, // last horizontal heading in world space (for camera)
 };
 
-// ease-in-out used for vertical rides and camera blends
-const smooth = (t) => t * t * (3 - 2 * t);
-
 const ghosts = GHOST_DEFS.map((def, i) => {
-  const vis = makeGhostMesh(def.color);
+  const vis = makeGhostMesh(def.color, def.name);
   scene.add(vis.group);
   return {
     ...def,
@@ -303,6 +436,15 @@ function addScore(n) {
     state.high = state.score;
     localStorage.setItem("pacman3d-high", String(state.high));
   }
+}
+
+let toastTimer = null;
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text;
+  t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("on"), 1300);
 }
 
 // floating score popup at a world position
@@ -422,11 +564,9 @@ addEventListener("keydown", (e) => {
   switch (e.code) {
     case "PageUp": case "KeyE": case "Space":
       queueVertical(1);
-      e.preventDefault();
       return;
     case "PageDown": case "KeyQ": case "ShiftLeft": case "ShiftRight":
       queueVertical(-1);
-      e.preventDefault();
       return;
   }
 
@@ -474,36 +614,39 @@ function horizontalKeyToDir(code) {
   return null;
 }
 
-// ---------------------------------------------------------------- camera presets
-// C toggles between a follow view and a top-down tactical view; free orbit
-// stays available in both.
+// ---------------------------------------------------------------- camera
+// Three views, cycled with C:
+//   FOLLOW — drifts gently behind Pac-Man's heading (very slow, eased)
+//   FIXED  — classic steady view, no rotation at all
+//   TOP    — top-down tactical view
+const CAM_MODES = [
+  { name: "FOLLOW", offset: new THREE.Vector3(0, 10.5, 9.5), rotate: true },
+  { name: "FIXED", offset: new THREE.Vector3(0, 10.5, 9.5), rotate: false },
+  { name: "TOP-DOWN", offset: new THREE.Vector3(0, 16.5, 0.02), rotate: false },
+];
 let camMode = 0;
 let camTween = null;
-const CAM_OFFSETS = [
-  new THREE.Vector3(0, 10.5, 9.5), // follow: ~48° over the shoulder
-  new THREE.Vector3(0, 16.5, 0.02), // top-down
-];
 
 function toggleCameraPreset() {
-  camMode = (camMode + 1) % CAM_OFFSETS.length;
+  camMode = (camMode + 1) % CAM_MODES.length;
   camTween = {
     from: camera.position.clone(),
-    to: controls.target.clone().add(CAM_OFFSETS[camMode]),
+    to: controls.target.clone().add(CAM_MODES[camMode].offset),
     t: 0,
   };
+  toast(`VIEW: ${CAM_MODES[camMode].name}`);
 }
 
-// In follow mode the camera swings around to stay behind Pac-Man's heading.
 // Manual orbiting pauses the auto-rotate briefly so the player can look around.
 let userOrbiting = false;
 let orbitCooldown = 0;
 controls.addEventListener("start", () => { userOrbiting = true; });
-controls.addEventListener("end", () => { userOrbiting = false; orbitCooldown = 2.5; });
+controls.addEventListener("end", () => { userOrbiting = false; orbitCooldown = 3.0; });
 
 function autoRotateCamera(dt) {
-  if (camMode !== 0 || camTween || userOrbiting) return;
+  if (!CAM_MODES[camMode].rotate || camTween || userOrbiting) return;
   if (orbitCooldown > 0) { orbitCooldown -= dt; return; }
-  if (state.phase !== "playing" || !pac.lastHorizWorld) return;
+  if (state.phase !== "playing" || !pac.lastHorizWorld || !pac.moving) return;
 
   const offset = camera.position.clone().sub(controls.target);
   const sph = new THREE.Spherical().setFromVector3(offset);
@@ -512,7 +655,9 @@ function autoRotateCamera(dt) {
   let dTheta = desired - sph.theta;
   while (dTheta > Math.PI) dTheta -= Math.PI * 2;
   while (dTheta < -Math.PI) dTheta += Math.PI * 2;
-  sph.theta += dTheta * Math.min(1, dt * 1.6);
+  // deadband so the view sits still on small corrections; slow eased drift
+  if (Math.abs(dTheta) < 0.06) return;
+  sph.theta += dTheta * Math.min(1, dt * 0.7);
   offset.setFromSpherical(sph);
   camera.position.copy(controls.target).add(offset);
 }
@@ -586,12 +731,13 @@ function updatePac(dt) {
   // mouth + orientation
   pac.mouthPhase += dt * (pac.moving ? 10 : 3);
   const idx = Math.floor((Math.sin(pac.mouthPhase) * 0.5 + 0.5) * (mouthGeos.length - 1));
-  pacMesh.geometry = mouthGeos[idx];
-  pacMesh.position.copy(pac.pos);
+  pacBody.geometry = mouthGeos[idx];
+  pacOutline.geometry = mouthGeos[idx];
+  pacGroup.position.copy(pac.pos);
   if (pac.dir && (pac.dir[0] || pac.dir[1] || pac.dir[2])) {
     const world = new THREE.Vector3(pac.dir[2], pac.dir[0], pac.dir[1]).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), world);
-    pacMesh.quaternion.slerp(q, Math.min(1, dt * 14));
+    pacGroup.quaternion.slerp(q, Math.min(1, dt * 14));
   }
   pacLight.position.copy(pac.pos).y += 0.6;
 }
@@ -748,8 +894,10 @@ function stepGhostNormally(g, dt, speed, target, frightened = false, useBfs = fa
 }
 
 function updateGhostVisual(g, dt) {
-  const { group, body, bodyMat, eyes } = g.vis;
+  const { group, body, bodyMat, skirtMat, eyes, irisMats } = g.vis;
   group.position.copy(g.pos);
+  // floating spirit bob
+  body.position.y = -0.02 + Math.sin(state.elapsed * 5 + g.releaseDelay * 2) * 0.045;
 
   const isEyes = g.state === "eyes" || g.state === "entering";
   body.visible = !isEyes;
@@ -757,9 +905,14 @@ function updateGhostVisual(g, dt) {
   if (g.frightened && !isEyes) {
     const blinking = state.frightTimer < FRIGHT_BLINK &&
       Math.floor(state.frightTimer * 5) % 2 === 0;
-    bodyMat.color.setHex(blinking ? 0xeeeeee : 0x2233dd);
+    const c = blinking ? 0xeeeeee : 0x2233dd;
+    bodyMat.color.setHex(c);
+    skirtMat.color.setHex(c);
+    for (const im of irisMats) im.color.setHex(0x222244);
   } else {
     bodyMat.color.setHex(g.color);
+    skirtMat.color.setHex(g.color);
+    for (const im of irisMats) im.color.setHex(IRIS_COLORS[g.name]);
   }
 
   // face the travel direction (horizontal component)
@@ -812,7 +965,7 @@ function updateVisibility() {
   };
   for (let l = 0; l < LAYERS; l++) {
     const d = Math.min(Math.abs(l - fl), 2);
-    wallFillMats[l].opacity = at([0.85, 0.10, 0.05], d);
+    wallFillMats[l].opacity = at([0.8, 0.10, 0.05], d);
     wallEdgeMats[l].opacity = at([1.0, 0.5, 0.22], d);
     floorPlateMats[l].opacity = at([0.4, 0.12, 0.12], d);
     pelletMatByFloor[l].opacity = at([1.0, 0.35, 0.15], d);
@@ -870,9 +1023,10 @@ function tick(now) {
   lastTime = now;
   state.elapsed += dt;
 
-  // power pellet pulse
+  // power pellet pulse + ambience
   const pulse = 1 + Math.sin(state.elapsed * 6) * 0.25;
   for (const mesh of powerMeshes) mesh.scale.setScalar(pulse);
+  updatePetals(dt, state.elapsed);
 
   switch (state.phase) {
     case "menu":
@@ -914,11 +1068,11 @@ function tick(now) {
       state.phaseTimer -= dt;
       // spiral-shrink animation
       const p = Math.max(state.phaseTimer / 1.6, 0);
-      pacMesh.scale.setScalar(Math.max(p, 0.001));
-      pacMesh.rotation.y += dt * 12;
+      pacGroup.scale.setScalar(Math.max(p, 0.001));
+      pacGroup.rotation.y += dt * 12;
       if (state.phaseTimer <= 0) {
-        pacMesh.scale.setScalar(1);
-        pacMesh.rotation.set(0, 0, 0);
+        pacGroup.scale.setScalar(1);
+        pacGroup.rotation.set(0, 0, 0);
         state.lives--;
         if (state.lives < 0) {
           state.phase = "gameover";
@@ -947,8 +1101,7 @@ function tick(now) {
   if (camTween) {
     camTween.t += dt * 2.2;
     const k = Math.min(camTween.t, 1);
-    const s = k * k * (3 - 2 * k); // smoothstep
-    camera.position.lerpVectors(camTween.from, camTween.to, s);
+    camera.position.lerpVectors(camTween.from, camTween.to, smooth(k));
     if (k >= 1) camTween = null;
   }
   const targetPos = pac.cell ? pac.pos : new THREE.Vector3(0, LAYER_H, 0);
@@ -958,7 +1111,7 @@ function tick(now) {
   autoRotateCamera(dt);
   controls.update();
 
-  renderer.render(scene, camera);
+  composer.render();
 }
 
 // ---------------------------------------------------------------- boot
@@ -966,10 +1119,10 @@ spawnPellets();
 state.pelletsLeft = pelletMeshes.size;
 resetPositions();
 controls.target.copy(pac.pos);
-camera.position.copy(pac.pos).add(CAM_OFFSETS[0]);
+camera.position.copy(pac.pos).add(CAM_MODES[0].offset);
 updateHud();
 updateFloorStack();
-setMessage("PAC-MAN 3D", "PRESS ENTER TO START");
+setMessage("PAC-MAN 3D", "パックマン 3D — PRESS ENTER TO START");
 requestAnimationFrame(tick);
 
 // debug/test hook: lets automated tests drive frames when rAF is throttled

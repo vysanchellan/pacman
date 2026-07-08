@@ -26,12 +26,25 @@ Then visit `http://localhost:8000` (or deploy to GitHub Pages — it works as-is
 | `PgUp` (or `E` / `Space`) | Go up a floor — sits right above the arrow keys |
 | `PgDn` (or `Q` / `Shift`) | Go down a floor |
 | On-screen `▲` / `▼` buttons | Same, for mouse or touch |
-| `C` | Toggle follow / top-down camera |
+| `C` | Cycle camera: FOLLOW / FIXED / TOP-DOWN |
 | Mouse drag / wheel | Orbit and zoom the camera |
 
-In follow mode the camera automatically swings around to stay behind Pac-Man's heading;
-dragging the mouse pauses the auto-rotate for a couple of seconds so you can look around.
-Floor changes glide with an ease-in-out, and the floor fade crossfades during the ride.
+Three camera views (cycled with `C`, shown as a toast):
+- **FOLLOW** — drifts gently behind Pac-Man's heading (slow, eased, with a deadband so
+  the view stays calm; it only rotates while he's actually moving).
+- **FIXED** — completely steady view, zero rotation, for maximum focus.
+- **TOP-DOWN** — tactical overhead view.
+
+Dragging the mouse pauses any auto-rotation for a few seconds. Floor changes glide with
+an ease-in-out and the floor fade crossfades during the ride.
+
+## Art direction
+
+Anime/cel-shaded look throughout: toon-shaded (3-step gradient) Pac-Man and ghosts with
+inked outlines, big sparkly anime eyes (each ghost has its own iris color), blush marks
+on Pac-Man, wavy spirit skirts and a floating bob on the ghosts, soft bloom glow over
+the neon maze, a starfield, and drifting sakura petals. The HUD uses rounded anime-style
+typography (Baloo 2 / M PLUS Rounded 1c) on violet glass panels.
 | `Enter` | Start / restart |
 
 Floor changes are **queued**: press `PgUp`/`PgDn` any time and Pac-Man rides the next
