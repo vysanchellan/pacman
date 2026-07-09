@@ -24,11 +24,9 @@
         <div class="stat"><span class="hud-label">SCORE</span><span id="score">0</span></div>
         <div class="stat"><span class="hud-label">HIGH</span><span id="highscore">0</span></div>
         <div class="stat"><span class="hud-label">LEVEL</span><span id="level">1</span></div>
-      </div>
-      <div id="fright-wrap"><div id="fright-bar"></div></div>
-      <div class="panel stat-group">
         <div class="stat"><span class="hud-label">LIVES</span><span id="lives"></span></div>
       </div>
+      <div id="fright-wrap"><div id="fright-bar"></div></div>
     </div>
 
     <div id="floor-stack" class="panel"></div>
@@ -36,12 +34,6 @@
     <div id="message"></div>
     <div id="toast"></div>
     <div id="shaft-hint"></div>
-
-    <div id="vert-buttons">
-      <button id="btn-up" title="Go up a floor (PgUp / E / Space)">&#9650;</button>
-      <button id="btn-down" title="Go down a floor (PgDn / Q / Shift)">&#9660;</button>
-      <button id="btn-recenter" title="Recenter the view (R)">&#8982;</button>
-    </div>
 
     <div id="info-corner">
       <button id="btn-info" title="Rules &amp; how to play (I)">?</button>
@@ -92,8 +84,8 @@
       </p>
       <p>You keep moving in your last direction until you turn or hit a wall. Floor
       changes are <b>queued</b>: press up/down any time and you'll ride the next shaft
-      you cross (one press = one floor; expires after ~6 s; the &#9650;/&#9660; button glows
-      gold while queued).</p>
+      you cross (one press = one floor; expires after ~6 s; a <b>&#9650; QUEUED</b> hint
+      shows on screen while one is pending).</p>
 
       <h3>THE FOUR WRAITHS</h3>
       <p>Each has a beacon pillar you can see through walls, and its own hunting brain:</p>

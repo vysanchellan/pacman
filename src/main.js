@@ -847,9 +847,6 @@ $("info-modal").addEventListener("pointerdown", (e) => {
 $("info-close").addEventListener("click", () => toggleInfo(false));
 
 for (const [id, action] of [
-  ["btn-up", () => queueVertical(1)],
-  ["btn-down", () => queueVertical(-1)],
-  ["btn-recenter", () => recenterView()],
   ["btn-info", () => toggleInfo()],
 ]) {
   const el = $(id);
@@ -1345,9 +1342,6 @@ function updateVisibility() {
   } else {
     hint.classList.remove("on");
   }
-  $("btn-up").classList.toggle("queued", !!pac.pendingVertical && pac.pendingVertical[0] > 0);
-  $("btn-down").classList.toggle("queued", !!pac.pendingVertical && pac.pendingVertical[0] < 0);
-
   // frightened timer bar
   const wrap = $("fright-wrap");
   if (state.frightTimer > 0) {

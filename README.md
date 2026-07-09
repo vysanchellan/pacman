@@ -24,8 +24,9 @@ npx serve .
 | Arrow keys / `W A S D` | Move on the current floor (camera-relative) |
 | `PgUp` (or `E` / `Space`) | Go up a floor at a shaft |
 | `PgDn` (or `Q` / `Shift`) | Go down a floor at a shaft |
-| On-screen `▲` / `▼` buttons | Same, for mouse or touch |
 | `C` | Cycle camera: FIXED / FOLLOW / TOP-DOWN |
+| `R` | Recenter the view |
+| `I` (or the `?` button) | Rules & how-to-play panel (pauses the game) |
 | Mouse drag / wheel | Orbit and zoom |
 | `Enter` | Start / restart |
 
@@ -37,8 +38,8 @@ pulse when usable, with an on-screen prompt.
 
 - **FIXED camera is the default**: the map never rotates on its own, so directions
   stay constant. FOLLOW (gentle eased drift behind your heading) and TOP-DOWN are a
-  `C` press away, and `R` (or the on-screen &#8982; button) recenters the view to the
-  current mode's default framing at any time.
+  `C` press away, and `R` recenters the view to the current mode's default framing
+  at any time.
 - **Ghost beacons**: every wraith carries a colored light pillar visible through
   walls — you always know where each one is and (by the pillar's height) which
   floor it's on. Beacons turn blue when frightened, faint white for returning eyes.

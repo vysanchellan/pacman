@@ -58,8 +58,8 @@ canvas {
 
 .stat-group {
   display: flex;
-  gap: 28px;
-  padding: 10px 22px;
+  gap: 20px;
+  padding: 8px 16px;
 }
 
 .stat {
@@ -71,25 +71,25 @@ canvas {
 
 .hud-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
 }
 
 #score, #highscore, #level {
   color: var(--accent);
-  font-size: 26px;
+  font-size: 18px;
   font-weight: 800;
-  text-shadow: 0 0 12px rgba(255, 212, 71, 0.6);
+  text-shadow: 0 0 10px rgba(255, 212, 71, 0.55);
 }
 
 #lives {
   color: var(--accent);
-  font-size: 22px;
-  letter-spacing: 6px;
-  min-width: 64px;
+  font-size: 15px;
+  letter-spacing: 4px;
+  min-width: 40px;
   text-align: center;
-  text-shadow: 0 0 12px rgba(255, 212, 71, 0.6);
+  text-shadow: 0 0 10px rgba(255, 212, 71, 0.55);
 }
 
 /* ---------------- frightened timer ---------------- */
@@ -277,46 +277,6 @@ canvas {
 }
 
 #shaft-hint.on { opacity: 1; }
-
-/* ---------------- vertical buttons ---------------- */
-#vert-buttons {
-  position: absolute;
-  right: 18px;
-  bottom: 64px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  pointer-events: auto;
-}
-
-#vert-buttons button {
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
-  border: 1.5px solid rgba(77, 255, 223, 0.5);
-  background: var(--panel-bg);
-  color: #4dffdf;
-  font-size: 22px;
-  font-family: var(--font);
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  text-shadow: 0 0 8px rgba(77, 255, 223, 0.7);
-  transition: all 0.12s;
-  outline: none;
-}
-
-#vert-buttons button:hover {
-  background: rgba(10, 70, 62, 0.65);
-  transform: scale(1.06);
-}
-
-#vert-buttons button:active { transform: scale(0.94); }
-
-#vert-buttons button.queued {
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: 0 0 16px rgba(255, 212, 71, 0.55);
-}
 
 /* ---------------- info button + rules panel ---------------- */
 #info-corner {
