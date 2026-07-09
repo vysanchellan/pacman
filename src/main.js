@@ -12,36 +12,49 @@ import { sfx } from "./audio.js";
 
 // ---------------------------------------------------------------- constants
 const LAYER_H = 2.4; // world height between floors
-const FRIGHT_SPEED = 2.6;
-const EYES_SPEED = 10.0;
-const EXIT_SPEED = 3.0;
+const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
+const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
+const EYES_SPEED = 14.0;
+const EXIT_SPEED = 5.0;
 const FRIGHT_BLINK = 2.0;
 const PENDING_VERT_TTL = 6.0; // queued floor-change expires after this many seconds
 
-// Difficulty curve: level 1 is fast but fair; from level 2 on you need to
-// know the routes and read ghost behaviour. Ghosts close the speed gap,
-// scatter breaks shrink, power pellets weaken, releases come sooner.
+// Arcade-parity difficulty: speeds follow the original game's percentages of
+// full speed, so clearing one floor takes as long as clearing an arcade level.
+// L1: Pac 80% / ghosts 75%. L2-4: 90% / 85%. L5+: 100% / 95%.
+// It's hard from the first level — that's the point.
 function levelTuning(level) {
-  const l = Math.min(level, 6);
+  const pacPct = level === 1 ? 0.8 : level <= 4 ? 0.9 : 1.0;
+  const ghostPct = level === 1 ? 0.75 : level <= 4 ? 0.85 : 0.95;
   return {
-    pacSpeed: 4.6 + 0.06 * (l - 1),
-    ghostSpeed: Math.min(4.05 + 0.18 * (l - 1), 4.6),
-    frightTime: Math.max(8 - 1.7 * (l - 1), 1.2),
-    releaseDelays: [
-      0,
-      Math.max(2 - 0.45 * (l - 1), 0.3),
-      Math.max(5 - 1.1 * (l - 1), 0.8),
-      Math.max(8 - 1.7 * (l - 1), 1.2),
-    ],
-    waves: l === 1
+    pacSpeed: FULL_SPEED * pacPct,
+    ghostSpeed: FULL_SPEED * ghostPct,
+    frightTime: Math.max(6 - (level - 1), 1),
+    releaseDelays: level === 1 ? [0, 1, 3, 5] : [0, 0.5, 1.5, 2.5],
+    waves: level === 1
       ? [["scatter", 7], ["chase", 20], ["scatter", 7], ["chase", 20],
          ["scatter", 5], ["chase", 20], ["scatter", 5], ["chase", Infinity]]
-      : l === 2
+      : level <= 4
         ? [["scatter", 5], ["chase", 25], ["scatter", 4], ["chase", 25],
            ["scatter", 3], ["chase", Infinity]]
         : [["scatter", 3], ["chase", 35], ["scatter", 2], ["chase", Infinity]],
   };
 }
+
+// Bonus fruits — one per level tier, arcade point values. In 3D they spawn on
+// a random floor at 25% / 50% / 75% of dots eaten and last 12 seconds:
+// detouring across floors for them is the risk/reward.
+const FRUITS = [
+  { name: "CHERRY", color: 0xff3355, points: 100 },
+  { name: "STRAWBERRY", color: 0xff5c8a, points: 300 },
+  { name: "ORANGE", color: 0xff9933, points: 500 },
+  { name: "APPLE", color: 0xdd2222, points: 700 },
+  { name: "MELON", color: 0x66dd44, points: 1000 },
+  { name: "GALAXIAN", color: 0x4488ff, points: 2000 },
+  { name: "BELL", color: 0xffd447, points: 3000 },
+  { name: "KEY", color: 0xdddddd, points: 5000 },
+];
+const FRUIT_LIFETIME = 12;
 
 // per-floor accent colors: bottom teal, middle blue, top violet
 const FLOOR_COLORS = [0x2dd6c8, 0x4d6bff, 0xb36bff];
@@ -69,7 +82,8 @@ function segmentTarget(cellA, cellB, dir, out) {
 
 // ---------------------------------------------------------------- three.js setup
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x10061f, 45, 135);
+scene.background = new THREE.Color(0x000000);
+scene.fog = new THREE.Fog(0x000000, 45, 135);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 300);
 
@@ -119,144 +133,24 @@ const toonMat = (color, opts = {}) =>
   new THREE.MeshToonMaterial({ color, gradientMap, ...opts });
 
 // ---------------------------------------------------------------- backdrop
-// night-sky dome, anime moon, distant ground grid, stars, sakura petals
-{
-  const skyCanvas = document.createElement("canvas");
-  skyCanvas.width = 16;
-  skyCanvas.height = 256;
-  const ctx = skyCanvas.getContext("2d");
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0.0, "#05020f");
-  grad.addColorStop(0.5, "#160a30");
-  grad.addColorStop(0.78, "#341050");
-  grad.addColorStop(1.0, "#61205f");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 16, 256);
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(180, 24, 16),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(skyCanvas), side: THREE.BackSide, fog: false })
-  );
-  scene.add(sky);
-
-  const moonCanvas = document.createElement("canvas");
-  moonCanvas.width = moonCanvas.height = 128;
-  const mc = moonCanvas.getContext("2d");
-  const mg = mc.createRadialGradient(64, 64, 10, 64, 64, 64);
-  mg.addColorStop(0, "rgba(255,244,208,1)");
-  mg.addColorStop(0.45, "rgba(255,236,180,0.95)");
-  mg.addColorStop(0.55, "rgba(255,220,150,0.35)");
-  mg.addColorStop(1, "rgba(255,210,130,0)");
-  mc.fillStyle = mg;
-  mc.fillRect(0, 0, 128, 128);
-  const moon = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: new THREE.CanvasTexture(moonCanvas), fog: false, depthWrite: false,
+// classic arcade black, with a slowly drifting field of tiny white stars —
+// the maze is where all the color lives
+const starField = (() => {
+  const COUNT = 900;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(COUNT * 3);
+  for (let i = 0; i < COUNT; i++) {
+    const v = new THREE.Vector3().randomDirection().multiplyScalar(90 + Math.random() * 80);
+    pos.set([v.x, v.y, v.z], i * 3);
+  }
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0xffffff, size: 0.22, transparent: true, opacity: 0.85,
+    sizeAttenuation: true, fog: false, depthWrite: false,
   }));
-  moon.position.set(-48, 40, -70);
-  moon.scale.setScalar(30);
-  scene.add(moon);
-
-  const grid = new THREE.GridHelper(160, 80, 0x5a2d8a, 0x241040);
-  grid.position.y = -1.6;
-  grid.material.transparent = true;
-  grid.material.opacity = 0.45;
-  scene.add(grid);
-
-  // jagged mountain skyline ringing the horizon
-  const mCanvas = document.createElement("canvas");
-  mCanvas.width = 1024;
-  mCanvas.height = 128;
-  const mctx = mCanvas.getContext("2d");
-  mctx.fillStyle = "#150a2e";
-  mctx.beginPath();
-  mctx.moveTo(0, 128);
-  let mx = 0;
-  while (mx < 1024) {
-    mctx.lineTo(mx + 30 + Math.random() * 40, 128 - (35 + Math.random() * 70));
-    mx += 60 + Math.random() * 50;
-    mctx.lineTo(Math.min(mx, 1024), 128 - (8 + Math.random() * 22));
-  }
-  mctx.lineTo(1024, 128);
-  mctx.closePath();
-  mctx.fill();
-  const mTex = new THREE.CanvasTexture(mCanvas);
-  mTex.wrapS = THREE.RepeatWrapping;
-  mTex.repeat.x = 3;
-  const mountains = new THREE.Mesh(
-    new THREE.CylinderGeometry(130, 130, 48, 64, 1, true),
-    new THREE.MeshBasicMaterial({ map: mTex, transparent: true, side: THREE.BackSide, fog: false, depthWrite: false })
-  );
-  mountains.position.y = 16;
-  scene.add(mountains);
-
-  const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(500 * 3);
-  for (let i = 0; i < 500; i++) {
-    const v = new THREE.Vector3().randomDirection().multiplyScalar(100 + Math.random() * 60);
-    v.y = Math.abs(v.y) * 0.7 - 4;
-    starPos.set([v.x, v.y, v.z], i * 3);
-  }
-  starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
-  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-    color: 0x9aa8ff, size: 0.4, transparent: true, opacity: 0.8, sizeAttenuation: true, fog: false,
-  })));
-}
-
-// soft drifting clouds
-const cloudSprites = [];
-{
-  const cCanvas = document.createElement("canvas");
-  cCanvas.width = 256;
-  cCanvas.height = 128;
-  const cctx = cCanvas.getContext("2d");
-  const cg = cctx.createRadialGradient(128, 64, 8, 128, 64, 120);
-  cg.addColorStop(0, "rgba(205,180,255,0.55)");
-  cg.addColorStop(0.55, "rgba(180,150,240,0.25)");
-  cg.addColorStop(1, "rgba(160,130,230,0)");
-  cctx.fillStyle = cg;
-  cctx.fillRect(0, 0, 256, 128);
-  const cTex = new THREE.CanvasTexture(cCanvas);
-  for (let i = 0; i < 6; i++) {
-    const cloud = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: cTex, transparent: true, opacity: 0.5, fog: false, depthWrite: false,
-    }));
-    cloud.position.set((Math.random() - 0.5) * 180, 24 + Math.random() * 16, (Math.random() - 0.5) * 180);
-    cloud.scale.set(34 + Math.random() * 18, 12 + Math.random() * 6, 1);
-    cloud.userData.speed = 0.8 + Math.random() * 1.0;
-    scene.add(cloud);
-    cloudSprites.push(cloud);
-  }
-}
-
-function updateClouds(dt) {
-  for (const cloud of cloudSprites) {
-    cloud.position.x += cloud.userData.speed * dt;
-    if (cloud.position.x > 110) cloud.position.x = -110;
-  }
-}
-
-const PETALS = 140;
-const petalGeo = new THREE.BufferGeometry();
-const petalPos = new Float32Array(PETALS * 3);
-const petalSeed = new Float32Array(PETALS);
-for (let i = 0; i < PETALS; i++) {
-  petalPos.set([(Math.random() - 0.5) * 40, Math.random() * 10 - 1, (Math.random() - 0.5) * 44], i * 3);
-  petalSeed[i] = Math.random() * Math.PI * 2;
-}
-petalGeo.setAttribute("position", new THREE.BufferAttribute(petalPos, 3));
-scene.add(new THREE.Points(petalGeo, new THREE.PointsMaterial({
-  color: 0xffa8d4, size: 0.14, transparent: true, opacity: 0.75, sizeAttenuation: true,
-})));
-
-function updatePetals(dt, elapsed) {
-  const p = petalGeo.attributes.position;
-  for (let i = 0; i < PETALS; i++) {
-    let y = p.getY(i) - dt * (0.35 + 0.15 * Math.sin(petalSeed[i]));
-    if (y < -1.2) y = 8;
-    p.setY(i, y);
-    p.setX(i, p.getX(i) + Math.sin(elapsed * 0.8 + petalSeed[i]) * dt * 0.4);
-  }
-  p.needsUpdate = true;
-}
+  scene.add(points);
+  return points;
+})();
 
 // ---------------------------------------------------------------- castle visuals
 const mazeData = collectCells();
@@ -275,10 +169,12 @@ const towerMats = []; // corner towers per floor
     const color = FLOOR_COLORS[l];
     const cellsHere = mazeData.walls.filter(([wl]) => wl === l);
 
+    // dark wall bodies with neon edges: luxury-arcade, not a lightbox
     const fillMat = new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 0.18,
-      transparent: true, opacity: 0.8, depthWrite: false,
-      roughness: 0.35, metalness: 0.15,
+      color: new THREE.Color(color).multiplyScalar(0.28),
+      emissive: color, emissiveIntensity: 0.14,
+      transparent: true, opacity: 0.9, depthWrite: false,
+      roughness: 0.3, metalness: 0.25,
     });
     wallFillMats.push(fillMat);
     const inst = new THREE.InstancedMesh(wallGeo, fillMat, cellsHere.length);
@@ -429,6 +325,72 @@ function spawnPellets() {
   }
 }
 
+// ---------------------------------------------------------------- fruit
+function armFruit() {
+  state.totalDots = pelletMeshes.size;
+  state.fruitAt = [0.25, 0.5, 0.75].map((f) => Math.round(state.totalDots * f));
+  state.fruitSpawned = 0;
+  clearFruit();
+}
+
+function clearFruit() {
+  if (state.fruit) {
+    scene.remove(state.fruit.group);
+    state.fruit = null;
+  }
+}
+
+function spawnFruit() {
+  clearFruit();
+  state.fruitSpawned++;
+  const def = FRUITS[Math.min(state.level - 1, FRUITS.length - 1)];
+  const floor = Math.floor(Math.random() * LAYERS);
+  const list = pelletsByFloor[floor];
+  const cell = list[Math.floor(Math.random() * list.length)];
+
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12),
+    new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 0.7 }));
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 6),
+    new THREE.MeshBasicMaterial({ color: 0x2d7a2d }));
+  stem.position.y = 0.36;
+  // gold beacon so the detour reads from any floor
+  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.4, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd447, transparent: true, opacity: 0.5,
+      depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+  beacon.position.y = 1.1;
+  beacon.renderOrder = 30;
+  group.add(body, stem, beacon);
+  cellToWorld(cell[0], cell[1], cell[2], group.position);
+  group.position.y += 0.1;
+  scene.add(group);
+
+  state.fruit = { def, cell, timer: FRUIT_LIFETIME, group };
+  toast(`${def.name} ON FLOOR ${cell[0] + 1} — ${def.points} PTS`);
+  sfx.power();
+}
+
+function updateFruit(dt) {
+  const f = state.fruit;
+  if (!f) return;
+  f.timer -= dt;
+  f.group.rotation.y += dt * 2;
+  f.group.scale.setScalar(1 + Math.sin(state.elapsed * 5) * 0.12);
+  if (f.timer <= 0) {
+    clearFruit();
+    return;
+  }
+  if (state.phase === "playing" && pac.pos.distanceTo(f.group.position) < 0.75) {
+    addScore(f.def.points);
+    popup(`+${f.def.points}`, f.group.position, "#ffd447");
+    sfx.eatGhost();
+    updateHud();
+    clearFruit();
+  }
+}
+
 // ---------------------------------------------------------------- pac-man visual
 // oni-style hunter: deep-gold chomping demon with horns, fierce glowing
 // slit eyes and an ember trail — mouth still opens along +X for aiming
@@ -554,7 +516,10 @@ function makeGhostMesh(color, name) {
   }
   cloakGeo.computeVertexNormals();
 
-  const cloakMat = toonMat(color, { side: THREE.DoubleSide });
+  // dark cloak that glows its signature color — shadowy but unmistakable
+  const cloakMat = toonMat(new THREE.Color(color).multiplyScalar(0.45).getHex(), {
+    side: THREE.DoubleSide, emissive: color, emissiveIntensity: 0.4,
+  });
   const body = new THREE.Group();
   const cloak = new THREE.Mesh(cloakGeo, cloakMat);
   const outline = new THREE.Mesh(cloakGeo,
@@ -598,7 +563,7 @@ function makeGhostMesh(color, name) {
   for (const side of [-1, 1]) {
     const mat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
     eyeMats.push(mat);
-    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, 0.03), mat);
+    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.03), mat);
     const zOff = name === "inky" ? 0.34 : 0.3;
     slit.position.set(side * 0.13, 0.2, zOff);
     slit.rotation.z = side * 0.38; // "\ /" glare
@@ -662,6 +627,10 @@ const state = {
   level: 1,
   tuning: levelTuning(1),
   pelletsLeft: 0,
+  totalDots: 0,
+  fruit: null, // { def, cell, timer, group }
+  fruitAt: [],
+  fruitSpawned: 0,
   waveIndex: 0,
   waveTimer: 0,
   frightTimer: 0,
@@ -741,6 +710,7 @@ function updateFloorStack() {
 }
 
 function resetPositions() {
+  clearFruit();
   pac.cell = [...mazeData.pacmanSpawn];
   pac.dir = [0, 0, 0];
   pac.desired = null;
@@ -781,6 +751,7 @@ function newGame() {
   state.tuning = levelTuning(1);
   spawnPellets();
   state.pelletsLeft = pelletMeshes.size;
+  armFruit();
   resetPositions();
   state.phase = "ready";
   state.phaseTimer = 2.2;
@@ -813,6 +784,10 @@ addEventListener("keydown", (e) => {
     toggleCameraPreset();
     return;
   }
+  if (e.code === "KeyR") {
+    recenterView();
+    return;
+  }
   if (state.phase !== "playing" && state.phase !== "ready") return;
 
   switch (e.code) {
@@ -831,14 +806,18 @@ addEventListener("keydown", (e) => {
   }
 });
 
-// on-screen floor buttons (mouse / touch). preventDefault stops the button
-// from taking focus — a focused button would swallow Space/Enter presses.
-for (const [id, dl] of [["btn-up", 1], ["btn-down", -1]]) {
+// on-screen buttons (mouse / touch). preventDefault stops the button from
+// taking focus — a focused button would swallow Space/Enter presses.
+for (const [id, action] of [
+  ["btn-up", () => queueVertical(1)],
+  ["btn-down", () => queueVertical(-1)],
+  ["btn-recenter", () => recenterView()],
+]) {
   const el = $(id);
   el.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     sfx.unlock();
-    queueVertical(dl);
+    action();
   });
   el.addEventListener("click", (e) => e.preventDefault());
   el.addEventListener("focus", () => el.blur());
@@ -915,29 +894,14 @@ function autoRotateCamera(dt) {
   camera.position.copy(controls.target).add(offset);
 }
 
-// compass: the rose rotates so "N" marks maze-north on screen; the needle
-// points the way Pac-Man is currently travelling
-const compassRoseEl = $("compass-rose");
-const compassNeedleEl = $("compass-needle");
-
-function updateCompass() {
-  const fwd = new THREE.Vector3();
-  camera.getWorldDirection(fwd);
-  fwd.y = 0;
-  if (fwd.lengthSq() < 1e-6) return;
-  fwd.normalize();
-  const bearing = (x, z) =>
-    Math.atan2(fwd.x * z - fwd.z * x, fwd.x * x + fwd.z * z);
-  // maze north is world -z
-  compassRoseEl.style.transform = `rotate(${bearing(0, -1)}rad)`;
-  if (pac.moving && pac.lastHorizWorld && pac.dir[0] === 0) {
-    const b = bearing(pac.lastHorizWorld.x, pac.lastHorizWorld.z);
-    compassNeedleEl.style.transform =
-      `translate(-50%, -100%) rotate(${b}rad)`;
-    compassNeedleEl.classList.remove("idle");
-  } else {
-    compassNeedleEl.classList.add("idle");
-  }
+// recenter: snap the camera back to the current mode's default framing
+function recenterView() {
+  camTween = {
+    from: camera.position.clone(),
+    to: controls.target.clone().add(CAM_MODES[camMode].offset),
+    t: 0,
+  };
+  toast("VIEW RECENTERED");
 }
 
 // ---------------------------------------------------------------- pac-man update
@@ -1034,6 +998,10 @@ function eatAt(cell) {
   }
   pelletMeshes.delete(k);
   state.pelletsLeft--;
+  const eaten = state.totalDots - state.pelletsLeft;
+  if (state.fruitSpawned < state.fruitAt.length && eaten >= state.fruitAt[state.fruitSpawned]) {
+    spawnFruit();
+  }
   if (entry.power) {
     addScore(50);
     sfx.power();
@@ -1059,6 +1027,7 @@ function levelUp() {
   state.tuning = levelTuning(state.level);
   spawnPellets();
   state.pelletsLeft = pelletMeshes.size;
+  armFruit();
   resetPositions();
   state.phase = "ready";
   state.phaseTimer = 2.6;
@@ -1083,10 +1052,10 @@ function ghostSpeed(g) {
   if (g.state === "exiting") return EXIT_SPEED;
   if (g.frightened) return FRIGHT_SPEED;
   let speed = state.tuning.ghostSpeed;
-  // Cruise Elroy: Blinky accelerates as the dots run out — learn to feel it
+  // Cruise Elroy: Blinky accelerates as the dots run out (arcade +5% / +10%)
   if (g.name === "blinky") {
-    if (state.pelletsLeft < 50) speed += 0.55;
-    else if (state.pelletsLeft < 120) speed += 0.28;
+    if (state.pelletsLeft < 30) speed += FULL_SPEED * 0.1;
+    else if (state.pelletsLeft < 60) speed += FULL_SPEED * 0.05;
   }
   return speed;
 }
@@ -1225,10 +1194,16 @@ function updateGhostVisual(g, dt) {
   if (g.frightened && !isEyes) {
     const blinking = state.frightTimer < FRIGHT_BLINK &&
       Math.floor(state.frightTimer * 5) % 2 === 0;
-    for (const m of tintMats) m.color.setHex(blinking ? 0xe8ecff : 0x2438e0);
+    for (const m of tintMats) {
+      m.color.setHex(blinking ? 0xe8ecff : 0x0a1030);
+      m.emissive.setHex(blinking ? 0xffffff : 0x2438e0);
+    }
     for (const m of eyeMats) m.color.setHex(0xffffff);
   } else {
-    for (const m of tintMats) m.color.setHex(g.color);
+    for (const m of tintMats) {
+      m.color.setHex(g.color).multiplyScalar(0.45);
+      m.emissive.setHex(g.color);
+    }
     for (const m of eyeMats) m.color.setHex(IRIS_COLORS[g.name]);
   }
 
@@ -1349,8 +1324,8 @@ function tick(now) {
   // power pellet pulse + ambience
   const pulse = 1 + Math.sin(state.elapsed * 6) * 0.25;
   for (const mesh of powerMeshes) mesh.scale.setScalar(pulse);
-  updatePetals(dt, state.elapsed);
-  updateClouds(dt);
+  starField.rotation.y += dt * 0.008; // slow drift
+  updateFruit(dt);
 
   switch (state.phase) {
     case "menu":
@@ -1429,12 +1404,11 @@ function tick(now) {
     if (k >= 1) camTween = null;
   }
   const targetPos = pac.cell ? pac.pos : new THREE.Vector3(0, LAYER_H, 0);
-  const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 5));
+  const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 8));
   controls.target.add(delta);
   camera.position.add(delta);
   autoRotateCamera(dt);
   controls.update();
-  updateCompass();
 
   composer.render();
 }
@@ -1447,7 +1421,7 @@ controls.target.copy(pac.pos);
 camera.position.copy(pac.pos).add(CAM_MODES[0].offset);
 updateHud();
 updateFloorStack();
-setMessage("PAC-MAN 3D", "パックマン 3D — PRESS ENTER TO START");
+setMessage("PAC-MAN 3D", "PRESS ENTER TO START");
 requestAnimationFrame(tick);
 
 // debug/test hook: lets automated tests drive frames when rAF is throttled

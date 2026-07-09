@@ -37,9 +37,8 @@ pulse when usable, with an on-screen prompt.
 
 - **FIXED camera is the default**: the map never rotates on its own, so directions
   stay constant. FOLLOW (gentle eased drift behind your heading) and TOP-DOWN are a
-  `C` press away.
-- A **compass dial** (bottom-left) always shows maze-north (`N`) relative to your
-  screen, and its gold needle points the way you're currently travelling.
+  `C` press away, and `R` (or the on-screen &#8982; button) recenters the view to the
+  current mode's default framing at any time.
 - **Ghost beacons**: every wraith carries a colored light pillar visible through
   walls — you always know where each one is and (by the pillar's height) which
   floor it's on. Beacons turn blue when frightened, faint white for returning eyes.
@@ -48,13 +47,14 @@ pulse when usable, with an on-screen prompt.
   used to occlude the action); the floor below stays ghostly for depth; your own
   floor renders bright and solid with boosted glow.
 
-## The world
+## The world — luxury arcade
 
-A floating night castle: rounded battlement blocks with glowing edges, corner
-watchtowers with conical roofs on every floor, a gradient dusk sky-dome, a huge
-anime moon, a starfield, a distant ground grid, and sakura petals drifting through
-the maze. Soft bloom makes the emissive things (pellets, shafts, eyes) actually glow —
-tuned so Pac-Man himself no longer floods the screen with light.
+Classic **pitch-black space with a slowly drifting field of tiny white stars** — the
+maze is where all the color lives. The castle itself is dark luxury: near-black wall
+bodies with neon edge glow (teal / blue / violet per floor), corner watchtowers with
+gold finials, and soft bloom on everything emissive. The HUD is black glass with gold
+trim. The ghosts are shadowy cloaks that glow their signature color, so they read as
+dark *and* unmistakable.
 
 ## The characters — killer anime redesign
 
@@ -83,13 +83,21 @@ spawn. All movement rules live here: `stepCell(layer,row,col,dir)` answers every
 "can I go this way?" question (wrap included). `node tools/validate.mjs` BFS-checks
 that all 719 dots are reachable and no open cell is a dead-end trap.
 
-### Difficulty — endless levels
-Level 1 is fast but fair. Every clear re-arms the castle harder: ghosts close the
-speed gap (4.05 → 4.6 vs your 4.6+), power pellets weaken (8 s of frightened time
-down to 1.2 s), scatter breaks shrink (7 s → 3 s → 2 s), and house releases come
-almost immediately. **Cruise Elroy** is in: Blinky gains speed when the dots run
-low (+0.28 under 120 left, +0.55 under 50) — from level 2 on you must know your
-routes and read the four behaviours to survive.
+### Difficulty — arcade parity, hard from level 1
+Speeds follow the original game's exact percentages of full speed (9.5 tiles/s), so
+clearing one floor takes as long as clearing an arcade level: L1 Pac 80% / ghosts
+75%, L2-4 90% / 85%, L5+ 100% / 95%. Frightened time starts at 6 s and loses a
+second per level (min 1 s); scatter breaks shrink; house releases accelerate.
+**Cruise Elroy** is in: Blinky gains +5% under 60 dots left and +10% under 30 —
+exactly the arcade's endgame pressure. You must know routes and read the four
+behaviours from the very first level.
+
+### Fruits — the 3D risk/reward
+Bonus fruit spawns at 25% / 50% / 75% of dots eaten, **on a random floor**, and
+lasts 12 seconds — announced with a toast and marked by a gold beacon. Detouring
+across floors for it is the gamble. Values climb with level, arcade-style:
+Cherry 100 → Strawberry 300 → Orange 500 → Apple 700 → Melon 1000 →
+Galaxian 2000 → Bell 3000 → Key 5000.
 
 ### Movement engine (`src/main.js`)
 Everything moves cell-to-cell on the grid with interpolated world positions

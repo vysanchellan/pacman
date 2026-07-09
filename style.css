@@ -4,14 +4,15 @@
   box-sizing: border-box;
 }
 
+/* luxury arcade: deep black glass, gold trim */
 :root {
-  --panel-bg: rgba(16, 8, 36, 0.72);
-  --panel-border: rgba(179, 107, 255, 0.4);
-  --panel-glow: rgba(179, 107, 255, 0.22);
+  --panel-bg: rgba(8, 8, 12, 0.82);
+  --panel-border: rgba(255, 212, 71, 0.32);
+  --panel-glow: rgba(255, 212, 71, 0.12);
   --accent: #ffd447;
   --accent-soft: #ffe9a3;
   --pink: #ff8fc8;
-  --muted: #9d8fc8;
+  --muted: #9a9285;
   --font: "Baloo 2", "M PLUS Rounded 1c", "Courier New", monospace;
 }
 
@@ -153,8 +154,8 @@ canvas {
   gap: 8px;
   padding: 8px 12px;
   border-radius: 12px;
-  border: 1.5px solid rgba(179, 107, 255, 0.25);
-  background: rgba(40, 22, 80, 0.4);
+  border: 1.5px solid rgba(255, 212, 71, 0.18);
+  background: rgba(20, 18, 12, 0.5);
   transition: all 0.25s;
 }
 
@@ -203,12 +204,12 @@ canvas {
 }
 
 #message:not(:empty) {
-  background: linear-gradient(160deg, rgba(24, 10, 48, 0.88), rgba(50, 14, 70, 0.88));
+  background: linear-gradient(160deg, rgba(10, 10, 14, 0.92), rgba(24, 20, 8, 0.92));
   border: 2px solid var(--panel-border);
   border-radius: 22px;
   padding: 30px 54px;
   backdrop-filter: blur(6px);
-  box-shadow: 0 8px 40px rgba(179, 107, 255, 0.35);
+  box-shadow: 0 8px 40px rgba(255, 212, 71, 0.18);
 }
 
 #message .sub {
@@ -216,7 +217,7 @@ canvas {
   margin-top: 14px;
   font-size: 16px;
   font-weight: 600;
-  color: var(--pink);
+  color: var(--accent-soft);
   letter-spacing: 3px;
   text-shadow: none;
 }
@@ -304,66 +305,6 @@ canvas {
   border-color: var(--accent);
   color: var(--accent);
   box-shadow: 0 0 16px rgba(255, 212, 71, 0.55);
-}
-
-/* ---------------- compass (bottom-left) ---------------- */
-#compass {
-  position: absolute;
-  left: 18px;
-  bottom: 64px;
-  width: 92px;
-  height: 92px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#compass-rose {
-  position: absolute;
-  inset: 0;
-  transition: transform 0.12s linear;
-}
-
-.c-mark {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.c-n { transform: translate(-50%, -50%) translateY(-34px); color: var(--pink); text-shadow: 0 0 8px rgba(255,143,200,0.8); }
-.c-e { transform: translate(-50%, -50%) translateX(34px); }
-.c-s { transform: translate(-50%, -50%) translateY(34px); }
-.c-w { transform: translate(-50%, -50%) translateX(-34px); }
-
-#compass-needle {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0;
-  height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-bottom: 22px solid var(--accent);
-  transform-origin: 50% 100%;
-  transform: translate(-50%, -100%) rotate(0deg);
-  filter: drop-shadow(0 0 6px rgba(255, 212, 71, 0.8));
-  transition: transform 0.12s linear, opacity 0.2s;
-}
-
-#compass-needle.idle { opacity: 0.2; }
-
-#compass-up {
-  position: absolute;
-  left: 50%;
-  top: -7px;
-  transform: translateX(-50%);
-  color: #4dffdf;
-  font-size: 11px;
-  text-shadow: 0 0 6px rgba(77, 255, 223, 0.8);
 }
 
 /* ---------------- bottom help ---------------- */
