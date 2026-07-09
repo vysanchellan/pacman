@@ -9,6 +9,9 @@ export const GHOST_DEFS = [
   { name: "pinky", color: 0xffb8ff, releaseDelay: 2 },
   { name: "inky", color: 0x00ffff, releaseDelay: 5 },
   { name: "clyde", color: 0xffb852, releaseDelay: 8 },
+  // the fifth wraith: pure chaos — no targeting brain at all, wanders the
+  // whole castle at random. Exists to be a wildcard and a fifth combo link.
+  { name: "wisp", color: 0x55ff77, releaseDelay: 10 },
 ];
 
 const dist2 = (a, b) =>

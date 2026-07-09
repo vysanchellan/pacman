@@ -168,6 +168,7 @@ export const GHOST_HOUSE = {
     [1, 13, 13], // center slot (Pinky)
     [1, 13, 11], // left slot (Inky)
     [1, 13, 15], // right slot (Clyde)
+    [1, 14, 13], // back slot (Wisp)
   ],
 };
 

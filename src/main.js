@@ -30,7 +30,7 @@ function levelTuning(level) {
     pacSpeed: FULL_SPEED * pacPct,
     ghostSpeed: FULL_SPEED * ghostPct,
     frightTime: Math.max(6 - (level - 1), 1),
-    releaseDelays: level === 1 ? [0, 1, 3, 5] : [0, 0.5, 1.5, 2.5],
+    releaseDelays: level === 1 ? [0, 1, 3, 5, 10] : [0, 0.5, 1.5, 2.5, 6],
     waves: level === 1
       ? [["scatter", 7], ["chase", 20], ["scatter", 7], ["chase", 20],
          ["scatter", 5], ["chase", 20], ["scatter", 5], ["chase", Infinity]]
@@ -60,7 +60,7 @@ const FRUIT_LIFETIME = 12;
 const FLOOR_COLORS = [0x2dd6c8, 0x4d6bff, 0xb36bff];
 
 // glowing eye color per wraith
-const IRIS_COLORS = { blinky: 0xff2244, pinky: 0xff66aa, inky: 0x33ddff, clyde: 0xffaa33 };
+const IRIS_COLORS = { blinky: 0xff2244, pinky: 0xff66aa, inky: 0x33ddff, clyde: 0xffaa33, wisp: 0x99ffbb };
 
 const OUTLINE_COLOR = 0x140a24;
 
@@ -557,6 +557,13 @@ function makeGhostMesh(color, name) {
     body.add(mask);
   } else if (name === "clyde") {
     body.scale.set(1.18, 0.94, 1.18);
+  } else if (name === "wisp") {
+    // crooked spirit-flame on his head — the chaos marker
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.28, 8),
+      new THREE.MeshBasicMaterial({ color: 0x99ffbb }));
+    flame.position.set(0.04, 0.58, 0);
+    flame.rotation.z = -0.35;
+    body.add(flame);
   }
   group.add(body);
 
@@ -1094,6 +1101,8 @@ function ghostSpeed(g) {
     if (state.pelletsLeft < 30) speed += FULL_SPEED * 0.1;
     else if (state.pelletsLeft < 60) speed += FULL_SPEED * 0.05;
   }
+  // the wisp drifts a little slower — dying to him is on you
+  if (g.name === "wisp") speed *= 0.85;
   return speed;
 }
 
@@ -1161,6 +1170,9 @@ function updateGhost(g, dt) {
       g.frightened = false;
       g.dir = null;
     });
+  } else if (g.name === "wisp") {
+    // no brain, no mode, no target: every intersection is a coin flip
+    stepGhostNormally(g, dt, speed, pac.cell, true);
   } else {
     // normal / frightened
     const mode = currentMode();
@@ -1229,8 +1241,9 @@ function updateGhostVisual(g, dt) {
     beaconMat.color.setHex(g.color);
     beaconMat.opacity = 0.5;
   }
-  // floating spirit bob
+  // floating spirit bob (the wisp adds a drunken sway)
   body.position.y = -0.02 + Math.sin(state.elapsed * 5 + g.releaseDelay * 2) * 0.045;
+  if (g.name === "wisp") body.rotation.z = Math.sin(state.elapsed * 6.5) * 0.14;
 
   const isEyes = g.state === "eyes" || g.state === "entering";
   body.visible = !isEyes;
@@ -1271,8 +1284,8 @@ function checkCollisions() {
       g.frightened = false;
       g.state = "eyes";
       g.next = null;
-      state.eatChain = Math.min(state.eatChain + 1, 4);
-      const pts = 100 * 2 ** state.eatChain; // 200 / 400 / 800 / 1600
+      state.eatChain = Math.min(state.eatChain + 1, 5);
+      const pts = 100 * 2 ** state.eatChain; // 200 / 400 / 800 / 1600 / 3200
       addScore(pts);
       popup(`+${pts}`, g.pos, "#66ccff");
       sfx.eatGhost();

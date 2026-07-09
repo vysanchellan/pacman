@@ -68,6 +68,7 @@ dark *and* unmistakable.
   - **Pinky** (rose) — trailing ribbons. *The ambusher.*
   - **Inky** (cyan) — a white kitsune mask. *The unpredictable one.*
   - **Clyde** (amber) — hulking, wider build. *The coward.*
+  - **Wisp** (green) — a flickering spirit-flame and a drunken sway. *Pure chaos.*
 
 When eaten, a wraith collapses to just its glowing eye slits, which race back to the
 castle keep to be reborn.
@@ -119,8 +120,14 @@ The original arcade brain, in 3D:
   - *Pinky* targets 4 cells ahead of Pac-Man's heading — including straight up/down.
   - *Inky* doubles the vector from Blinky through the point 2 ahead of Pac-Man.
   - *Clyde* chases like Blinky beyond 8 cells, else flees to his corner.
+  - *Wisp* — the fifth wraith, unique to the 3D castle: no targeting brain at all.
+    Every intersection is a random pick across all six directions, on every floor.
+    He never hunts and drifts 15% slower — if he kills you, you walked into him.
+    He exists because chaining ghosts across three floors is brutal: he's the
+    fifth combo link.
 - **Power pellets** trigger frightened mode (slow, random turns, blue, blinking
-  before it ends; timer bar in the HUD). Eating ghosts chains 200/400/800/1600.
+  before it ends; timer bar in the HUD). Eating ghosts chains
+  200/400/800/1600/**3200**.
 - Eaten ghosts become **eyes** that BFS the shortest path home, re-enter through the
   door, and re-release. House releases stagger 0/2/5/8 seconds.
 
