@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -90,12 +91,22 @@ const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 30
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// filmic response + soft studio reflections give the dark surfaces real sheen
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 document.body.appendChild(renderer.domElement);
+
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.32;
+  pmrem.dispose();
+}
 
 // soft anime-glow post-processing (threshold high so only true emitters bloom)
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.38, 0.5, 0.85);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.55, 0.8);
 composer.addPass(bloom);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -132,6 +143,52 @@ const gradientMap = (() => {
 const toonMat = (color, opts = {}) =>
   new THREE.MeshToonMaterial({ color, gradientMap, ...opts });
 
+// procedural maps for the castle masonry
+const wallMaps = (() => {
+  // neon trim: a bright band near the top edge of every block face
+  const trim = document.createElement("canvas");
+  trim.width = trim.height = 64;
+  const tc = trim.getContext("2d");
+  tc.fillStyle = "#000";
+  tc.fillRect(0, 0, 64, 64);
+  tc.fillStyle = "#fff";
+  tc.fillRect(0, 6, 64, 5);
+  tc.fillStyle = "rgba(255,255,255,0.3)";
+  tc.fillRect(0, 55, 64, 3);
+  const trimTex = new THREE.CanvasTexture(trim);
+
+  // blocky roughness noise so light breaks up across the stone
+  const rough = document.createElement("canvas");
+  rough.width = rough.height = 128;
+  const rc = rough.getContext("2d");
+  for (let y = 0; y < 128; y += 4) {
+    for (let x = 0; x < 128; x += 4) {
+      const v = 70 + Math.random() * 110;
+      rc.fillStyle = `rgb(${v},${v},${v})`;
+      rc.fillRect(x, y, 4, 4);
+    }
+  }
+  const roughTex = new THREE.CanvasTexture(rough);
+
+  // glowing tile seams for the polished floor plates
+  const grid = document.createElement("canvas");
+  grid.width = COLS * 8;
+  grid.height = ROWS * 8;
+  const gc = grid.getContext("2d");
+  gc.fillStyle = "#000";
+  gc.fillRect(0, 0, grid.width, grid.height);
+  gc.strokeStyle = "rgba(255,255,255,0.55)";
+  gc.lineWidth = 1;
+  for (let x = 0; x <= COLS; x++) {
+    gc.beginPath(); gc.moveTo(x * 8 + 0.5, 0); gc.lineTo(x * 8 + 0.5, grid.height); gc.stroke();
+  }
+  for (let y = 0; y <= ROWS; y++) {
+    gc.beginPath(); gc.moveTo(0, y * 8 + 0.5); gc.lineTo(grid.width, y * 8 + 0.5); gc.stroke();
+  }
+  const gridTex = new THREE.CanvasTexture(grid);
+  return { trimTex, roughTex, gridTex };
+})();
+
 // ---------------------------------------------------------------- backdrop
 // classic arcade black, with a slowly drifting field of tiny white stars —
 // the maze is where all the color lives
@@ -152,12 +209,58 @@ const starField = (() => {
   return points;
 })();
 
+// dust motes drifting slowly through the castle air
+const motes = (() => {
+  const COUNT = 180;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(COUNT * 3);
+  for (let i = 0; i < COUNT; i++) {
+    pos.set([
+      (Math.random() - 0.5) * 30,
+      Math.random() * 7 - 0.5,
+      (Math.random() - 0.5) * 33,
+    ], i * 3);
+  }
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0xb9a8ff, size: 0.055, transparent: true, opacity: 0.5,
+    sizeAttenuation: true, depthWrite: false,
+  }));
+  scene.add(points);
+  return points;
+})();
+
+// soft violet halo the castle floats on
+{
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = 256;
+  const ctx = cv.getContext("2d");
+  const rg = ctx.createRadialGradient(128, 128, 20, 128, 128, 128);
+  rg.addColorStop(0, "rgba(120,70,220,0.5)");
+  rg.addColorStop(0.6, "rgba(80,40,170,0.18)");
+  rg.addColorStop(1, "rgba(60,30,140,0)");
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, 256, 256);
+  const halo = new THREE.Mesh(
+    new THREE.CircleGeometry(27, 40),
+    new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(cv), transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.y = -1.58;
+  scene.add(halo);
+}
+
 // ---------------------------------------------------------------- castle visuals
 const mazeData = collectCells();
 const wallFillMats = []; // solid fill per floor
 const wallEdgeMats = []; // glowing wireframe per floor
+const wallCapMats = []; // neon cornice caps per floor
 const floorPlateMats = [];
 const towerMats = []; // corner towers per floor
+const towerGlowMats = []; // tower light rings / finials per floor
 
 {
   // rounded battlement blocks instead of raw cubes
@@ -169,12 +272,13 @@ const towerMats = []; // corner towers per floor
     const color = FLOOR_COLORS[l];
     const cellsHere = mazeData.walls.filter(([wl]) => wl === l);
 
-    // dark wall bodies with neon edges: luxury-arcade, not a lightbox
+    // obsidian masonry: near-black glossy stone with a neon trim band —
+    // realistic sheen from the environment, vibrancy from the emissive trim
     const fillMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(color).multiplyScalar(0.28),
-      emissive: color, emissiveIntensity: 0.14,
-      transparent: true, opacity: 0.9, depthWrite: false,
-      roughness: 0.3, metalness: 0.25,
+      color: new THREE.Color(color).multiplyScalar(0.22),
+      metalness: 0.78, roughness: 0.42, roughnessMap: wallMaps.roughTex,
+      emissive: color, emissiveMap: wallMaps.trimTex, emissiveIntensity: 1.3,
+      transparent: true, opacity: 0.94, depthWrite: false,
     });
     wallFillMats.push(fillMat);
     const inst = new THREE.InstancedMesh(wallGeo, fillMat, cellsHere.length);
@@ -186,6 +290,24 @@ const towerMats = []; // corner towers per floor
     });
     inst.renderOrder = 1;
     scene.add(inst);
+
+    // cornice caps: a slim glowing lid on every block, like inlaid neon piping
+    const capMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color).multiplyScalar(0.5),
+      emissive: color, emissiveIntensity: 0.75,
+      metalness: 0.7, roughness: 0.3,
+      transparent: true, opacity: 0.95, depthWrite: false,
+    });
+    wallCapMats.push(capMat);
+    const capGeo = new THREE.BoxGeometry(1.04, 0.07, 1.04);
+    const caps = new THREE.InstancedMesh(capGeo, capMat, cellsHere.length);
+    cellsHere.forEach(([wl, r, c], i) => {
+      cellToWorld(wl, r, c, v);
+      m.makeTranslation(v.x, v.y + 0.52, v.z);
+      caps.setMatrixAt(i, m);
+    });
+    caps.renderOrder = 1;
+    scene.add(caps);
 
     // merged wireframe of every wall block on this floor: stays readable
     // even when the floor's solid fill is faded out
@@ -210,9 +332,11 @@ const towerMats = []; // corner towers per floor
     lines.renderOrder = 2;
     scene.add(lines);
 
-    // floor plate
-    const plateMat = new THREE.MeshBasicMaterial({
-      color: 0x0d0724, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
+    // polished floor: dark marble sheen with glowing tile seams
+    const plateMat = new THREE.MeshStandardMaterial({
+      color: 0x08080e, metalness: 0.9, roughness: 0.3,
+      emissive: color, emissiveMap: wallMaps.gridTex, emissiveIntensity: 0.35,
+      transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false,
     });
     floorPlateMats.push(plateMat);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), plateMat);
@@ -220,22 +344,48 @@ const towerMats = []; // corner towers per floor
     floor.position.y = l * LAYER_H - 0.55;
     scene.add(floor);
 
-    // watchtowers on the four corners give each floor a castle silhouette
-    const towerMat = toonMat(color, { transparent: true, opacity: 0.9 });
+    // ornate watchtowers: stone base, fluted barrel, glowing light rings,
+    // dark spired roof with a gold finial
+    const towerMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color).multiplyScalar(0.3),
+      metalness: 0.8, roughness: 0.38, roughnessMap: wallMaps.roughTex,
+      emissive: color, emissiveIntensity: 0.12,
+      transparent: true, opacity: 0.95, depthWrite: false,
+    });
     towerMats.push(towerMat);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    towerGlowMats.push(glowMat);
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xffd447, metalness: 1.0, roughness: 0.25,
+      emissive: 0xffd447, emissiveIntensity: 0.5,
+      transparent: true, opacity: 0.95, depthWrite: false,
+    });
+    towerGlowMats.push(goldMat);
     const hx = (COLS - 1) / 2 + 0.7;
     const hz = (ROWS - 1) / 2 + 0.7;
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
         const tower = new THREE.Group();
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.68, 1.7, 12), towerMat);
-        const roof = new THREE.Mesh(new THREE.ConeGeometry(0.78, 0.95, 12), towerMat);
-        roof.position.y = 1.3;
-        const glow = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0xffd447 }));
-        glow.position.y = 1.85;
-        tower.add(barrel, roof, glow);
-        tower.position.set(sx * hx, l * LAYER_H + 0.25, sz * hz);
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.88, 0.5, 12), towerMat);
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.64, 1.7, 14), towerMat);
+        barrel.position.y = 1.0;
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.05, 12), towerMat);
+        roof.position.y = 2.3;
+        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 6), goldMat);
+        spire.position.y = 3.0;
+        const finial = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), goldMat);
+        finial.position.y = 3.28;
+        tower.add(base, barrel, roof, spire, finial);
+        for (const ry of [0.55, 1.5]) {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.022, 8, 28), glowMat);
+          ring.rotation.x = Math.PI / 2;
+          ring.position.y = ry;
+          tower.add(ring);
+        }
+        tower.position.set(sx * hx, l * LAYER_H - 0.2, sz * hz);
         scene.add(tower);
       }
     }
@@ -244,6 +394,7 @@ const towerMats = []; // corner towers per floor
 
 // vertical shaft beams — highlighted when Pac-Man can use them
 const shaftBeams = []; // { mesh, mat, lowLayer, r, c }
+const shaftRings = []; // animated rings rising through each shaft
 {
   const shaftGeo = new THREE.CylinderGeometry(0.34, 0.34, LAYER_H, 14, 1, true);
   const seen = new Set();
@@ -262,6 +413,22 @@ const shaftBeams = []; // { mesh, mat, lowLayer, r, c }
       beam.renderOrder = 3;
       scene.add(beam);
       shaftBeams.push({ mesh: beam, mat, lowLayer: low, r, c });
+
+      // rising elevator rings inside the shaft
+      for (let k = 0; k < 2; k++) {
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.3, 0.022, 8, 22),
+          new THREE.MeshBasicMaterial({
+            color: 0x4dffdf, transparent: true, opacity: 0,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+          })
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(beam.position.x, 0, beam.position.z);
+        ring.renderOrder = 4;
+        scene.add(ring);
+        shaftRings.push({ ring, baseY: low * LAYER_H, phase: k / 2 });
+      }
     }
   }
 
@@ -1386,12 +1553,15 @@ function updateVisibility() {
     const above = rel > 0;
     const d = Math.min(Math.abs(rel), 2);
     wallFillMats[l].opacity = at(above ? [0.94, 0.012, 0.005] : [0.94, 0.07, 0.03], d);
-    wallFillMats[l].emissiveIntensity = at([0.35, 0.08, 0.04], d);
-    wallEdgeMats[l].opacity = at(above ? [1.0, 0.045, 0.015] : [1.0, 0.18, 0.07], d);
+    wallFillMats[l].emissiveIntensity = at([1.35, 0.2, 0.08], d);
+    wallCapMats[l].opacity = at(above ? [0.95, 0.012, 0.005] : [0.95, 0.07, 0.03], d);
+    wallEdgeMats[l].opacity = at(above ? [0.85, 0.045, 0.015] : [0.85, 0.18, 0.07], d);
     floorPlateMats[l].opacity = at([0.55, 0.06, 0.03], d);
     pelletMatByFloor[l].opacity = at(above ? [1.0, 0.025, 0.01] : [1.0, 0.14, 0.05], d);
     powerMatByFloor[l].opacity = at(above ? [1.0, 0.12, 0.06] : [1.0, 0.3, 0.12], d);
     towerMats[l].opacity = at([0.95, 0.2, 0.08], d);
+    towerGlowMats[l * 2].opacity = at([0.85, 0.15, 0.06], d);
+    towerGlowMats[l * 2 + 1].opacity = at([0.95, 0.2, 0.08], d);
   }
 
   // shaft beams: glow when Pac-Man is standing where they can be used
@@ -1446,6 +1616,12 @@ function tick(now) {
   const pulse = 1 + Math.sin(state.elapsed * 6) * 0.25;
   for (const mesh of powerMeshes) mesh.scale.setScalar(pulse);
   starField.rotation.y += dt * 0.008; // slow drift
+  motes.rotation.y += dt * 0.012;
+  for (const { ring, baseY, phase } of shaftRings) {
+    const t = (state.elapsed * 0.35 + phase) % 1;
+    ring.position.y = baseY + t * LAYER_H;
+    ring.material.opacity = 0.5 * Math.sin(Math.PI * t);
+  }
 
   if (state.paused) {
     controls.update();
