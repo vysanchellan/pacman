@@ -732,6 +732,65 @@ function updateFloorStack() {
   floorStackEl.innerHTML = html;
 }
 
+// ---------------------------------------------------------------- minimap
+// live map of the floor you're on: walls + shafts prerendered per floor,
+// then just you, the wraiths sharing your floor, and any fruit
+const MM_S = 5;
+const miniCanvas = $("minimap");
+miniCanvas.width = COLS * MM_S;
+miniCanvas.height = ROWS * MM_S;
+const mmCtx = miniCanvas.getContext("2d");
+
+const mmWallLayers = FLOOR_COLORS.map((color, l) => {
+  const cv = document.createElement("canvas");
+  cv.width = miniCanvas.width;
+  cv.height = miniCanvas.height;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "rgba(4,4,8,0.9)";
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = `#${new THREE.Color(color).multiplyScalar(0.8).getHexString()}`;
+  for (const [wl, r, c] of mazeData.walls) {
+    if (wl === l) ctx.fillRect(c * MM_S, r * MM_S, MM_S, MM_S);
+  }
+  ctx.fillStyle = "#4dffdf";
+  for (const [sl, r, c] of mazeData.shafts) {
+    if (sl === l) ctx.fillRect(c * MM_S + 1, r * MM_S + 1, MM_S - 2, MM_S - 2);
+  }
+  if (l === 1) {
+    const [, dr, dc] = GHOST_HOUSE.door;
+    ctx.fillStyle = "#ffb8de";
+    ctx.fillRect(dc * MM_S, dr * MM_S, MM_S, MM_S);
+  }
+  return cv;
+});
+
+function mmDot(x, z, color, rad) {
+  const px = (x + (COLS - 1) / 2 + 0.5) * MM_S;
+  const py = (z + (ROWS - 1) / 2 + 0.5) * MM_S;
+  mmCtx.fillStyle = color;
+  mmCtx.beginPath();
+  mmCtx.arc(px, py, rad, 0, Math.PI * 2);
+  mmCtx.fill();
+}
+
+function updateMinimap() {
+  const fl = pac.cell ? pac.cell[0] : 1;
+  mmCtx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
+  mmCtx.drawImage(mmWallLayers[fl], 0, 0);
+  if (state.fruit && state.fruit.cell[0] === fl) {
+    mmDot(state.fruit.group.position.x, state.fruit.group.position.z, "#ffd447", 3.2);
+  }
+  for (const g of ghosts) {
+    if (g.cell[0] !== fl) continue; // this floor only
+    const isEyes = g.state === "eyes" || g.state === "entering";
+    const color = isEyes ? "rgba(255,255,255,0.45)"
+      : g.frightened ? "#3355ff"
+        : `#${g.color.toString(16).padStart(6, "0")}`;
+    mmDot(g.pos.x, g.pos.z, color, 3);
+  }
+  mmDot(pac.pos.x, pac.pos.z, "#ffe000", 3.6);
+}
+
 function resetPositions() {
   clearFruit();
   pac.cell = [...mazeData.pacmanSpawn];
@@ -895,12 +954,15 @@ function horizontalKeyToDir(code) {
 // direction-reading trivial. FOLLOW adds a slow eased drift behind Pac-Man's
 // heading, and the compass dial keeps you oriented in every mode.
 const CAM_MODES = [
-  { name: "FIXED", offset: new THREE.Vector3(0, 12.5, 11.5), rotate: false },
-  { name: "FOLLOW", offset: new THREE.Vector3(0, 12.5, 11.5), rotate: true },
+  { name: "FIXED", offset: new THREE.Vector3(0, 15, 9.5), rotate: false },
+  { name: "FOLLOW", offset: new THREE.Vector3(0, 15, 9.5), rotate: true },
   { name: "TOP-DOWN", offset: new THREE.Vector3(0, 30, 0.05), rotate: false },
 ];
 let camMode = 0;
 let camTween = null;
+// the angle the camera holds rigidly in non-rotating modes; orbiting adjusts
+// it, everything else (shaft rides, respawns, damping) cannot move it
+const camOffset = CAM_MODES[0].offset.clone();
 
 function toggleCameraPreset() {
   camMode = (camMode + 1) % CAM_MODES.length;
@@ -916,7 +978,12 @@ function toggleCameraPreset() {
 let userOrbiting = false;
 let orbitCooldown = 0;
 controls.addEventListener("start", () => { userOrbiting = true; });
-controls.addEventListener("end", () => { userOrbiting = false; orbitCooldown = 3.0; });
+controls.addEventListener("end", () => {
+  userOrbiting = false;
+  orbitCooldown = 3.0;
+  // the player picked a new angle: that's the constant from now on
+  camOffset.copy(camera.position).sub(controls.target);
+});
 
 function autoRotateCamera(dt) {
   if (!CAM_MODES[camMode].rotate || camTween || userOrbiting) return;
@@ -1461,7 +1528,10 @@ function tick(now) {
     camTween.t += dt * 2.2;
     const k = Math.min(camTween.t, 1);
     camera.position.lerpVectors(camTween.from, camTween.to, smooth(k));
-    if (k >= 1) camTween = null;
+    if (k >= 1) {
+      camTween = null;
+      camOffset.copy(camera.position).sub(controls.target);
+    }
   }
   const targetPos = pac.cell ? pac.pos : new THREE.Vector3(0, LAYER_H, 0);
   const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 8));
@@ -1469,6 +1539,12 @@ function tick(now) {
   camera.position.add(delta);
   autoRotateCamera(dt);
   controls.update();
+  // constant angle: in non-rotating modes the offset is enforced rigidly, so
+  // nothing (damping glide, follow lag, floor rides) can tilt the view
+  if (!userOrbiting && !camTween && !CAM_MODES[camMode].rotate) {
+    camera.position.copy(controls.target).add(camOffset);
+  }
+  updateMinimap();
 
   composer.render();
 }

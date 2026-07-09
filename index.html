@@ -29,7 +29,13 @@
       <div id="fright-wrap"><div id="fright-bar"></div></div>
     </div>
 
-    <div id="floor-stack" class="panel"></div>
+    <div id="right-col">
+      <div id="minimap-panel" class="panel">
+        <div class="fs-title">FLOOR MAP</div>
+        <canvas id="minimap"></canvas>
+      </div>
+      <div id="floor-stack" class="panel"></div>
+    </div>
 
     <div id="message"></div>
     <div id="toast"></div>
@@ -127,9 +133,12 @@
       <b>50</b>.</p>
 
       <h3>READING THE HUD</h3>
-      <p>The <b>FLOORS panel</b> (right) shows which floor you and every wraith are on,
-      plus the <b>dots left per floor</b> (&#10003; = cleared) &mdash; plan which floor to close
-      out first, and remember Blinky rages when the level's dots run low.</p>
+      <p>The <b>FLOOR MAP</b> (right) is a live map of the floor you're on: your gold dot,
+      any wraiths <i>currently on your floor</i> (blue while frightened, pale as eyes),
+      cyan shaft squares, and fruit. Below it, the <b>FLOORS panel</b> shows which floor
+      you and every wraith are on, plus the <b>dots left per floor</b> (&#10003; = cleared)
+      &mdash; plan which floor to close out first, and remember Blinky rages when the
+      level's dots run low.</p>
     </div>
   </div>
 
