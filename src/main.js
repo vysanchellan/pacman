@@ -303,6 +303,7 @@ const powerMeshes = [];
 
 function spawnPellets() {
   pelletMeshes.clear();
+  state.dotsPerFloor = [0, 0, 0];
   const m = new THREE.Matrix4();
   const v = new THREE.Vector3();
   pelletsByFloor.forEach((list, l) => {
@@ -311,6 +312,7 @@ function spawnPellets() {
       m.makeTranslation(v.x, v.y, v.z);
       pelletInst[l].setMatrixAt(i, m);
       pelletMeshes.set(pelletKey(ll, r, c), { power: false, floor: l, index: i });
+      state.dotsPerFloor[l]++;
     });
     pelletInst[l].instanceMatrix.needsUpdate = true;
   });
@@ -322,6 +324,7 @@ function spawnPellets() {
     scene.add(mesh);
     pelletMeshes.set(pelletKey(l, r, c), { power: true, mesh });
     powerMeshes.push(mesh);
+    state.dotsPerFloor[l]++;
   }
 }
 
@@ -570,7 +573,16 @@ function makeGhostMesh(color, name) {
     eyes.add(slit);
   }
   group.add(eyes);
-  return { group, body, tintMats, eyeMats, eyes };
+
+  // every material in the rig, for whole-ghost fading when it's on another floor
+  const fadeMats = [];
+  group.traverse((o) => {
+    if (o.isMesh) {
+      o.material.transparent = true;
+      fadeMats.push(o.material);
+    }
+  });
+  return { group, body, tintMats, eyeMats, eyes, fadeMats };
 }
 
 // ---------------------------------------------------------------- entities
@@ -628,6 +640,8 @@ const state = {
   tuning: levelTuning(1),
   pelletsLeft: 0,
   totalDots: 0,
+  dotsPerFloor: [0, 0, 0],
+  paused: false,
   fruit: null, // { def, cell, timer, group }
   fruitAt: [],
   fruitSpawned: 0,
@@ -690,11 +704,11 @@ function updateFloorStack() {
   const pl = pac.cell ? pac.cell[0] : 1;
   const ghostFloors = ghosts.map((g) =>
     g.state === "house" || g.state === "entering" ? -1 : g.cell[0]);
-  const sig = `${pl}|${ghostFloors.join(",")}`;
+  const sig = `${pl}|${ghostFloors.join(",")}|${state.dotsPerFloor.join(",")}`;
   if (sig === floorStackSig) return;
   floorStackSig = sig;
 
-  let html = `<div class="fs-title">FLOORS</div>`;
+  let html = `<div class="fs-title">FLOORS &middot; DOTS</div>`;
   for (let l = LAYERS - 1; l >= 0; l--) {
     const dots = [`${pl === l ? '<span class="dot pac"></span>' : ""}`];
     ghosts.forEach((g, i) => {
@@ -703,8 +717,10 @@ function updateFloorStack() {
         dots.push(`<span class="dot" style="background:${col};box-shadow:0 0 5px ${col}"></span>`);
       }
     });
-    html += `<div class="floor-row${pl === l ? " active" : ""}">
-      <span class="fl">${l + 1}</span>${dots.join("")}</div>`;
+    const left = state.dotsPerFloor[l];
+    html += `<div class="floor-row${pl === l ? " active" : ""}${left === 0 ? " cleared" : ""}">
+      <span class="fl">${l + 1}</span>${dots.join("")}
+      <span class="fd">${left === 0 ? "&#10003;" : left}</span></div>`;
   }
   floorStackEl.innerHTML = html;
 }
@@ -774,6 +790,16 @@ addEventListener("keydown", (e) => {
   if (e.code === "Space" || e.code === "PageUp" || e.code === "PageDown") e.preventDefault();
   if (e.repeat) return; // ignore OS key auto-repeat entirely
 
+  if (e.code === "Escape") {
+    if (state.paused) toggleInfo(false);
+    return;
+  }
+  if (e.code === "KeyI") {
+    toggleInfo();
+    return;
+  }
+  if (state.paused) return; // rules panel open: game input is frozen
+
   if (e.code === "Enter") {
     if (state.phase === "menu" || state.phase === "gameover") {
       newGame();
@@ -808,10 +834,23 @@ addEventListener("keydown", (e) => {
 
 // on-screen buttons (mouse / touch). preventDefault stops the button from
 // taking focus — a focused button would swallow Space/Enter presses.
+// rules / how-to-play panel: opening it pauses the game
+function toggleInfo(show) {
+  const modal = $("info-modal");
+  const on = show !== undefined ? show : !modal.classList.contains("on");
+  modal.classList.toggle("on", on);
+  state.paused = on;
+}
+$("info-modal").addEventListener("pointerdown", (e) => {
+  if (e.target === $("info-modal")) toggleInfo(false);
+});
+$("info-close").addEventListener("click", () => toggleInfo(false));
+
 for (const [id, action] of [
   ["btn-up", () => queueVertical(1)],
   ["btn-down", () => queueVertical(-1)],
   ["btn-recenter", () => recenterView()],
+  ["btn-info", () => toggleInfo()],
 ]) {
   const el = $(id);
   el.addEventListener("pointerdown", (e) => {
@@ -998,6 +1037,7 @@ function eatAt(cell) {
   }
   pelletMeshes.delete(k);
   state.pelletsLeft--;
+  state.dotsPerFloor[cell[0]]--;
   const eaten = state.totalDots - state.pelletsLeft;
   if (state.fruitSpawned < state.fruitAt.length && eaten >= state.fruitAt[state.fruitSpawned]) {
     spawnFruit();
@@ -1170,8 +1210,15 @@ function stepGhostNormally(g, dt, speed, target, frightened = false, useBfs = fa
 }
 
 function updateGhostVisual(g, dt) {
-  const { group, body, tintMats, eyeMats, eyes, beacon, beaconMat } = g.vis;
+  const { group, body, tintMats, eyeMats, eyes, beacon, beaconMat, fadeMats } = g.vis;
   group.position.copy(g.pos);
+
+  // ghosts on other floors fade way down so they can't be mistaken for a
+  // threat on yours — the beacon still marks them
+  const pacFloor = pac.cell ? pac.cell[0] : 1;
+  const targetOp = g.cell[0] === pacFloor ? 1 : 0.22;
+  const k = Math.min(1, dt * 8);
+  for (const m of fadeMats) m.opacity += (targetOp - m.opacity) * k;
 
   // beacon tracks the wraith from above, tinted by its state
   beacon.position.set(g.pos.x, g.pos.y + 1.5, g.pos.z);
@@ -1261,13 +1308,13 @@ function updateVisibility() {
     const rel = l - fl;
     const above = rel > 0;
     const d = Math.min(Math.abs(rel), 2);
-    wallFillMats[l].opacity = at(above ? [0.94, 0.025, 0.01] : [0.94, 0.1, 0.04], d);
-    wallFillMats[l].emissiveIntensity = at([0.35, 0.1, 0.05], d);
-    wallEdgeMats[l].opacity = at(above ? [1.0, 0.08, 0.03] : [1.0, 0.26, 0.1], d);
-    floorPlateMats[l].opacity = at([0.55, 0.08, 0.04], d);
-    pelletMatByFloor[l].opacity = at(above ? [1.0, 0.05, 0.02] : [1.0, 0.2, 0.08], d);
-    powerMatByFloor[l].opacity = at(above ? [1.0, 0.2, 0.1] : [1.0, 0.4, 0.18], d);
-    towerMats[l].opacity = at([0.95, 0.25, 0.1], d);
+    wallFillMats[l].opacity = at(above ? [0.94, 0.012, 0.005] : [0.94, 0.07, 0.03], d);
+    wallFillMats[l].emissiveIntensity = at([0.35, 0.08, 0.04], d);
+    wallEdgeMats[l].opacity = at(above ? [1.0, 0.045, 0.015] : [1.0, 0.18, 0.07], d);
+    floorPlateMats[l].opacity = at([0.55, 0.06, 0.03], d);
+    pelletMatByFloor[l].opacity = at(above ? [1.0, 0.025, 0.01] : [1.0, 0.14, 0.05], d);
+    powerMatByFloor[l].opacity = at(above ? [1.0, 0.12, 0.06] : [1.0, 0.3, 0.12], d);
+    towerMats[l].opacity = at([0.95, 0.2, 0.08], d);
   }
 
   // shaft beams: glow when Pac-Man is standing where they can be used
@@ -1325,6 +1372,12 @@ function tick(now) {
   const pulse = 1 + Math.sin(state.elapsed * 6) * 0.25;
   for (const mesh of powerMeshes) mesh.scale.setScalar(pulse);
   starField.rotation.y += dt * 0.008; // slow drift
+
+  if (state.paused) {
+    controls.update();
+    composer.render();
+    return;
+  }
   updateFruit(dt);
 
   switch (state.phase) {

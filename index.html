@@ -43,6 +43,10 @@
       <button id="btn-recenter" title="Recenter the view (R)">&#8982;</button>
     </div>
 
+    <div id="info-corner">
+      <button id="btn-info" title="Rules &amp; how to play (I)">?</button>
+    </div>
+
     <div id="hud-bottom" class="panel">
       <span><b>&#8592;&#8593;&#8594;&#8595;</b> MOVE</span>
       <span><b>PGUP</b> FLOOR UP</span>
@@ -53,6 +57,85 @@
     </div>
   </div>
   <div id="popups"></div>
+
+  <div id="info-modal">
+    <div id="info-card">
+      <button id="info-close">&#10005;</button>
+      <h2>PAC-MAN 3D &mdash; HOW TO PLAY</h2>
+
+      <h3>THE GOAL</h3>
+      <p>Eat every dot on <b>all three floors</b> of the castle to clear the level.
+      Four wraiths hunt you. Touch one and you lose a life &mdash; lose all three and
+      it's game over. Levels are endless and each one is harder.</p>
+
+      <h3>THE CASTLE</h3>
+      <p>Three stacked copies of the classic maze: <b>Floor 1</b> (teal, bottom),
+      <b>Floor 2</b> (blue, middle &mdash; you start here, and the wraiths' keep is here),
+      <b>Floor 3</b> (violet, top). Your floor renders bright; other floors fade out.
+      The <b>glowing cyan columns are shafts</b> &mdash; the only places you can ride up or
+      down. They pulse when you're standing on one.</p>
+
+      <h3>TUNNELS</h3>
+      <p>The corridor across the middle of every floor exits the maze on both sides and
+      <b>wraps around</b> to the opposite edge, exactly like the arcade. Wraiths re-decide
+      their route at every cell, so a well-timed wrap breaks a chase.</p>
+
+      <h3>CONTROLS</h3>
+      <p>
+        <span class="kbd">&#8592;&#8593;&#8594;&#8595;</span> / <span class="kbd">WASD</span> move (relative to the camera) &middot;
+        <span class="kbd">PGUP</span> / <span class="kbd">E</span> / <span class="kbd">SPACE</span> up a floor &middot;
+        <span class="kbd">PGDN</span> / <span class="kbd">Q</span> / <span class="kbd">SHIFT</span> down a floor<br />
+        <span class="kbd">C</span> camera view (fixed / follow / top-down) &middot;
+        <span class="kbd">R</span> recenter view &middot;
+        <span class="kbd">DRAG</span> orbit &middot; <span class="kbd">WHEEL</span> zoom &middot;
+        <span class="kbd">I</span> this panel &middot; <span class="kbd">ENTER</span> start
+      </p>
+      <p>You keep moving in your last direction until you turn or hit a wall. Floor
+      changes are <b>queued</b>: press up/down any time and you'll ride the next shaft
+      you cross (one press = one floor; expires after ~6 s; the &#9650;/&#9660; button glows
+      gold while queued).</p>
+
+      <h3>THE FOUR WRAITHS</h3>
+      <p>Each has a beacon pillar you can see through walls, and its own hunting brain:</p>
+      <p>
+        <b class="g-blinky">BLINKY</b> (crimson, horns) &mdash; targets you directly. Fastest to
+        punish hesitation. When few dots remain he <b>speeds up</b> (Cruise Elroy).<br />
+        <b class="g-pinky">PINKY</b> (rose, ribbons) &mdash; aims <b>4 cells ahead</b> of where
+        you're heading &mdash; including straight up or down a shaft. Turn often to fake her out.<br />
+        <b class="g-inky">INKY</b> (cyan, mask) &mdash; takes the point 2 cells ahead of you,
+        draws a line from Blinky to it, and doubles it. Unpredictable; watch him near Blinky.<br />
+        <b class="g-clyde">CLYDE</b> (amber, hulking) &mdash; chases like Blinky when far, but
+        <b>retreats to his corner</b> when within 8 cells. Use his cowardice to herd him.
+      </p>
+      <p>Wraiths alternate between <b>chase</b> and short <b>scatter</b> breaks (each
+      patrols a corner on a <i>different floor</i>). Every mode switch makes all of them
+      <b>reverse direction</b> &mdash; that's your cue. They never reverse otherwise.</p>
+
+      <h3>POWER PELLETS</h3>
+      <p>The four large pulsing pellets per floor turn the wraiths blue and slow for a
+      few seconds (timer bar at the top; it blinks near the end). Eat them for
+      <b>200 &rarr; 400 &rarr; 800 &rarr; 1600</b> points per chain. Eaten wraiths race home as
+      eyes and are reborn. Frightened time shrinks every level.</p>
+
+      <h3>FRUITS</h3>
+      <p>At 25% / 50% / 75% of dots eaten, a bonus fruit appears <b>on a random floor</b>
+      (gold beacon + announcement) for 12 seconds. Values climb with level:
+      Cherry 100, Strawberry 300, Orange 500, Apple 700, Melon 1000, Galaxian 2000,
+      Bell 3000, Key 5000. Detour or not &mdash; that's the gamble.</p>
+
+      <h3>SPEED &amp; LEVELS</h3>
+      <p>Speeds match the original arcade: level 1 you run at 80% of full speed, wraiths
+      at 75%. Levels 2&ndash;4: 90% / 85%. Level 5+: 100% / 95%. Scatter breaks shrink and
+      the keep releases wraiths faster every level. Dots: <b>10</b> &middot; power pellet:
+      <b>50</b>.</p>
+
+      <h3>READING THE HUD</h3>
+      <p>The <b>FLOORS panel</b> (right) shows which floor you and every wraith are on,
+      plus the <b>dots left per floor</b> (&#10003; = cleared) &mdash; plan which floor to close
+      out first, and remember Blinky rages when the level's dots run low.</p>
+    </div>
+  </div>
+
   <script type="module" src="src/main.js"></script>
 </body>
 </html>
