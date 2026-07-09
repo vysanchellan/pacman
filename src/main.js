@@ -88,9 +88,10 @@ scene.fog = new THREE.Fog(0x000000, 45, 135);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 300);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// 1.5x is visually identical under bloom but ~44% fewer pixels than 2x
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 // filmic response + soft studio reflections give the dark surfaces real sheen
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
@@ -106,7 +107,8 @@ document.body.appendChild(renderer.domElement);
 // soft anime-glow post-processing (threshold high so only true emitters bloom)
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.55, 0.8);
+// half-resolution bloom buffer: the glow is soft anyway, and it's ~4x cheaper
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.5, 0.55, 0.8);
 composer.addPass(bloom);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -253,6 +255,132 @@ const motes = (() => {
   scene.add(halo);
 }
 
+// aurora ribbons: three luminous bands orbiting the castle at different
+// tilts and speeds — pure additive light, almost free to draw
+const ribbons = [];
+{
+  const defs = [
+    { radius: 24, y: 2.5, tilt: 0.10, color: 0x33ddff, speed: 0.05 },
+    { radius: 28, y: 4.5, tilt: -0.14, color: 0xb36bff, speed: -0.035 },
+    { radius: 33, y: 1.0, tilt: 0.05, color: 0xffd447, speed: 0.022 },
+  ];
+  for (const d of defs) {
+    const pts = [];
+    for (let i = 0; i <= 90; i++) {
+      const a = (i / 90) * Math.PI * 2;
+      pts.push(new THREE.Vector3(
+        Math.cos(a) * d.radius,
+        Math.sin(a * 3) * 0.9,
+        Math.sin(a) * d.radius
+      ));
+    }
+    const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 140, 0.055, 5, true);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: d.color, transparent: true, opacity: 0.32,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    }));
+    mesh.position.y = d.y;
+    mesh.rotation.x = d.tilt;
+    scene.add(mesh);
+    ribbons.push({ mesh, speed: d.speed, baseY: d.y, bob: Math.random() * Math.PI * 2 });
+  }
+}
+
+// arcane containment field: a vast, slowly turning hexagonal energy shell
+// around the whole castle
+const hexDome = (() => {
+  const cv = document.createElement("canvas");
+  cv.width = 256;
+  cv.height = 224;
+  const ctx = cv.getContext("2d");
+  ctx.strokeStyle = "rgba(140, 210, 255, 0.85)";
+  ctx.lineWidth = 1.5;
+  const s = 32; // hex size
+  const h = s * Math.sqrt(3) / 2;
+  for (let row = -1; row < 5; row++) {
+    for (let col = -1; col < 5; col++) {
+      const cx = col * s * 3 + (row % 2 ? s * 1.5 : 0);
+      const cy = row * h;
+      ctx.beginPath();
+      for (let i = 0; i <= 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const x = cx + Math.cos(a) * s;
+        const y = cy + Math.sin(a) * s;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(10, 5);
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(44, 32, 20),
+    new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.05, side: THREE.BackSide,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    })
+  );
+  dome.position.y = 2;
+  scene.add(dome);
+  return dome;
+})();
+
+// shooting stars streaking across the black
+const comets = [];
+{
+  const cv = document.createElement("canvas");
+  cv.width = 64;
+  cv.height = 8;
+  const ctx = cv.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 64, 0);
+  grad.addColorStop(0, "rgba(255,255,255,0)");
+  grad.addColorStop(0.75, "rgba(255,255,255,0.9)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 8);
+  const tex = new THREE.CanvasTexture(cv);
+  for (let i = 0; i < 2; i++) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    }));
+    sprite.scale.set(6, 0.5, 1);
+    scene.add(sprite);
+    comets.push({ sprite, vel: new THREE.Vector3(), life: 0, wait: 2 + i * 5 });
+  }
+}
+
+function updateSky(dt) {
+  for (const r of ribbons) {
+    r.mesh.rotation.y += r.speed * dt;
+    r.mesh.position.y = r.baseY + Math.sin(state.elapsed * 0.4 + r.bob) * 0.5;
+  }
+  hexDome.rotation.y += dt * 0.012;
+  hexDome.material.opacity = 0.045 + 0.02 * Math.sin(state.elapsed * 0.9);
+
+  for (const c of comets) {
+    if (c.life <= 0) {
+      c.wait -= dt;
+      if (c.wait <= 0) {
+        // launch from a random point high in the sky
+        const a = Math.random() * Math.PI * 2;
+        c.sprite.position.set(Math.cos(a) * 70, 25 + Math.random() * 25, Math.sin(a) * 70);
+        c.vel.set(-Math.cos(a) * 30 + (Math.random() - 0.5) * 14, -6 - Math.random() * 6,
+          -Math.sin(a) * 30 + (Math.random() - 0.5) * 14);
+        c.sprite.material.rotation = Math.atan2(-c.vel.y, Math.hypot(c.vel.x, c.vel.z));
+        c.life = 2.2;
+        c.wait = 4 + Math.random() * 8;
+      }
+      continue;
+    }
+    c.life -= dt;
+    c.sprite.position.addScaledVector(c.vel, dt);
+    c.sprite.material.opacity = Math.min(1, c.life) * 0.8;
+    if (c.life <= 0) c.sprite.material.opacity = 0;
+  }
+}
+
 // ---------------------------------------------------------------- castle visuals
 const mazeData = collectCells();
 const wallFillMats = []; // solid fill per floor
@@ -261,6 +389,7 @@ const wallCapMats = []; // neon cornice caps per floor
 const floorPlateMats = [];
 const towerMats = []; // corner towers per floor
 const towerGlowMats = []; // tower light rings / finials per floor
+const floorMeshRefs = []; // per-floor meshes, so invisible floors skip rendering
 
 {
   // rounded battlement blocks instead of raw cubes
@@ -343,6 +472,8 @@ const towerGlowMats = []; // tower light rings / finials per floor
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = l * LAYER_H - 0.55;
     scene.add(floor);
+
+    floorMeshRefs.push({ fill: inst, caps, lines, plate: floor });
 
     // ornate watchtowers: stone base, fluted barrel, glowing light rings,
     // dark spired roof with a gold finial
@@ -1552,8 +1683,10 @@ function updateVisibility() {
     const rel = l - fl;
     const above = rel > 0;
     const d = Math.min(Math.abs(rel), 2);
+    // breathing trim: the active floor's neon slowly pulses like a heartbeat
+    const breathe = 0.88 + 0.12 * Math.sin(state.elapsed * 1.7 + l);
     wallFillMats[l].opacity = at(above ? [0.94, 0.012, 0.005] : [0.94, 0.07, 0.03], d);
-    wallFillMats[l].emissiveIntensity = at([1.35, 0.2, 0.08], d);
+    wallFillMats[l].emissiveIntensity = at([1.35, 0.2, 0.08], d) * breathe;
     wallCapMats[l].opacity = at(above ? [0.95, 0.012, 0.005] : [0.95, 0.07, 0.03], d);
     wallEdgeMats[l].opacity = at(above ? [0.85, 0.045, 0.015] : [0.85, 0.18, 0.07], d);
     floorPlateMats[l].opacity = at([0.55, 0.06, 0.03], d);
@@ -1562,6 +1695,15 @@ function updateVisibility() {
     towerMats[l].opacity = at([0.95, 0.2, 0.08], d);
     towerGlowMats[l * 2].opacity = at([0.85, 0.15, 0.06], d);
     towerGlowMats[l * 2 + 1].opacity = at([0.95, 0.2, 0.08], d);
+
+    // overdraw culling: a floor faded to nothing shouldn't cost fill rate
+    const refs = floorMeshRefs[l];
+    const show = wallFillMats[l].opacity > 0.015;
+    refs.fill.visible = show;
+    refs.caps.visible = show;
+    refs.plate.visible = show;
+    refs.lines.visible = wallEdgeMats[l].opacity > 0.02;
+    pelletInst[l].visible = pelletMatByFloor[l].opacity > 0.02;
   }
 
   // shaft beams: glow when Pac-Man is standing where they can be used
@@ -1603,6 +1745,31 @@ function updateVisibility() {
   }
 }
 
+// ---------------------------------------------------------------- adaptive quality
+// smoothness is non-negotiable: if the average frame cost creeps up, quietly
+// step the render load down (never back up, to avoid oscillation)
+let perfAcc = 0;
+let perfFrames = 0;
+let qualityLevel = 0; // 0 full → 1 lower pixel ratio → 2 bloom off
+
+function adaptQuality(dt) {
+  perfAcc += dt;
+  perfFrames++;
+  if (perfFrames < 150) return; // judge ~2.5s windows
+  const avg = perfAcc / perfFrames;
+  perfAcc = 0;
+  perfFrames = 0;
+  if (avg <= 1 / 45 || qualityLevel >= 2) return;
+  qualityLevel++;
+  if (qualityLevel === 1) {
+    renderer.setPixelRatio(1);
+    renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
+  } else {
+    bloom.enabled = false;
+  }
+}
+
 // ---------------------------------------------------------------- main loop
 let lastTime = performance.now();
 
@@ -1622,6 +1789,8 @@ function tick(now) {
     ring.position.y = baseY + t * LAYER_H;
     ring.material.opacity = 0.5 * Math.sin(Math.PI * t);
   }
+  updateSky(dt);
+  adaptQuality(dt);
 
   if (state.paused) {
     controls.update();
