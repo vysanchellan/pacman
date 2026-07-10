@@ -840,11 +840,12 @@ function makeGhostMesh(color, name) {
   }
   cloakGeo.computeVertexNormals();
 
-  // full classic-color cloak that SELF-GLOWS its color: scene lighting is so
-  // dark that lit color alone still read as black — the strong emissive keeps
-  // every wraith unmistakably red/pink/cyan/orange/green from any angle
-  const cloakMat = toonMat(color, {
-    side: THREE.DoubleSide, emissive: color, emissiveIntensity: 1.0,
+  // UNLIT flat classic-color cloak. The toon/emissive variant failed to
+  // render on some GPUs (cloak invisible → only the black outline hull
+  // showed). MeshBasicMaterial ignores lighting entirely: the exact arcade
+  // color on every machine, guaranteed.
+  const cloakMat = new THREE.MeshBasicMaterial({
+    color, side: THREE.DoubleSide,
   });
   const body = new THREE.Group();
   const cloak = new THREE.Mesh(cloakGeo, cloakMat);
@@ -1658,16 +1659,11 @@ function updateGhostVisual(g, dt) {
   if (g.vis.tintKey !== tintKey) {
     g.vis.tintKey = tintKey;
     if (tintKey > 0) {
-      for (const m of tintMats) {
-        m.color.setHex(blinking ? 0xe8ecff : 0x0a1030);
-        m.emissive.setHex(blinking ? 0xffffff : 0x2438e0);
-      }
-      for (const m of eyeMats) m.color.setHex(0xffffff);
+      // frightened: bright arcade blue (white during the end-of-timer blink)
+      for (const m of tintMats) m.color.setHex(blinking ? 0xffffff : 0x2438e0);
+      for (const m of eyeMats) m.color.setHex(blinking ? 0x2438e0 : 0xffffff);
     } else {
-      for (const m of tintMats) {
-        m.color.setHex(g.color);
-        m.emissive.setHex(g.color);
-      }
+      for (const m of tintMats) m.color.setHex(g.color);
       for (const m of eyeMats) m.color.setHex(IRIS_COLORS[g.name]);
     }
   }
