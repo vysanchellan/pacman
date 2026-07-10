@@ -840,8 +840,9 @@ function makeGhostMesh(color, name) {
   }
   cloakGeo.computeVertexNormals();
 
-  // dark cloak that glows its signature color — shadowy but unmistakable
-  const cloakMat = toonMat(new THREE.Color(color).multiplyScalar(0.45).getHex(), {
+  // full classic-color cloak with a matching glow — instantly identifiable
+  // even across the maze (the beacon arrow alone wasn't enough)
+  const cloakMat = toonMat(color, {
     side: THREE.DoubleSide, emissive: color, emissiveIntensity: 0.4,
   });
   const body = new THREE.Group();
@@ -1662,7 +1663,7 @@ function updateGhostVisual(g, dt) {
       for (const m of eyeMats) m.color.setHex(0xffffff);
     } else {
       for (const m of tintMats) {
-        m.color.setHex(g.color).multiplyScalar(0.45);
+        m.color.setHex(g.color);
         m.emissive.setHex(g.color);
       }
       for (const m of eyeMats) m.color.setHex(IRIS_COLORS[g.name]);
