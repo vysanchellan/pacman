@@ -42,8 +42,9 @@ function levelTuning(level) {
   };
 }
 
-// Bonus fruits — one per level tier, arcade point values. In 3D they spawn on
-// a random floor at 25% / 50% / 75% of dots eaten and last 12 seconds:
+// Bonus fruits — one per level tier, arcade point values. Like the arcade they
+// appear at the center court just below the keep, but the floor is random:
+// they spawn at 25% / 50% / 75% of dots eaten and last 12 seconds —
 // detouring across floors for them is the risk/reward.
 const FRUITS = [
   { name: "CHERRY", color: 0xff3355, points: 100 },
@@ -56,6 +57,9 @@ const FRUITS = [
   { name: "KEY", color: 0xdddddd, points: 5000 },
 ];
 const FRUIT_LIFETIME = 12;
+// the arcade fruit spot: the open court directly below the ghost house,
+// centered between the two middle columns (open on every floor)
+const FRUIT_SPOT = [17, 13];
 
 // per-floor accent colors: bottom teal, middle blue, top violet
 const FLOOR_COLORS = [0x2dd6c8, 0x4d6bff, 0xb36bff];
@@ -70,6 +74,17 @@ const cellToWorld = (l, r, c, out = new THREE.Vector3()) =>
 
 // ease-in-out used for vertical rides and camera blends
 const smooth = (t) => t * t * (3 - 2 * t);
+
+// scratch objects reused by the per-frame hot paths — the update loop should
+// allocate nothing
+const _vA = new THREE.Vector3();
+const _vB = new THREE.Vector3();
+const _vC = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _m4 = new THREE.Matrix4();
+const _sph = new THREE.Spherical();
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const UP = new THREE.Vector3(0, 1, 0);
 
 // world position of a segment's end; when the segment crosses the tunnel wrap
 // the target is rendered one cell past the edge so motion stays smooth
@@ -639,6 +654,7 @@ function clearFruit() {
     scene.remove(state.fruit.group);
     state.fruit = null;
   }
+  document.getElementById("fruit-chip").classList.remove("on");
 }
 
 function spawnFruit() {
@@ -646,8 +662,7 @@ function spawnFruit() {
   state.fruitSpawned++;
   const def = FRUITS[Math.min(state.level - 1, FRUITS.length - 1)];
   const floor = Math.floor(Math.random() * LAYERS);
-  const list = pelletsByFloor[floor];
-  const cell = list[Math.floor(Math.random() * list.length)];
+  const cell = [floor, FRUIT_SPOT[0], FRUIT_SPOT[1]];
 
   const group = new THREE.Group();
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12),
@@ -665,10 +680,17 @@ function spawnFruit() {
   beacon.renderOrder = 30;
   group.add(body, stem, beacon);
   cellToWorld(cell[0], cell[1], cell[2], group.position);
+  group.position.x += 0.5; // sit dead-center between the two middle columns
   group.position.y += 0.1;
   scene.add(group);
 
   state.fruit = { def, cell, timer: FRUIT_LIFETIME, group };
+  const hex = `#${def.color.toString(16).padStart(6, "0")}`;
+  $("fruit-label").textContent = `${def.name} · FLOOR ${cell[0] + 1} · ${def.points} PTS`;
+  const icon = $("fruit-icon");
+  icon.style.background = hex;
+  icon.style.color = hex;
+  $("fruit-chip").classList.add("on");
   toast(`${def.name} ON FLOOR ${cell[0] + 1} — ${def.points} PTS`);
   sfx.power();
 }
@@ -679,6 +701,7 @@ function updateFruit(dt) {
   f.timer -= dt;
   f.group.rotation.y += dt * 2;
   f.group.scale.setScalar(1 + Math.sin(state.elapsed * 5) * 0.12);
+  $("fruit-bar").style.width = `${Math.max(0, (f.timer / FRUIT_LIFETIME) * 100)}%`;
   if (f.timer <= 0) {
     clearFruit();
     return;
@@ -1162,6 +1185,10 @@ addEventListener("keydown", (e) => {
     toggleInfo();
     return;
   }
+  if (e.code === "KeyP") {
+    if (!$("info-modal").classList.contains("on") && state.phase === "playing") togglePause();
+    return;
+  }
   if (state.paused) return; // rules panel open: game input is frozen
 
   if (e.code === "Enter") {
@@ -1198,12 +1225,20 @@ addEventListener("keydown", (e) => {
 
 // on-screen buttons (mouse / touch). preventDefault stops the button from
 // taking focus — a focused button would swallow Space/Enter presses.
+// manual pause (P) — independent of the rules panel
+let manualPause = false;
+function togglePause() {
+  manualPause = !manualPause;
+  state.paused = manualPause;
+  setMessage(manualPause ? "PAUSED" : "", manualPause ? "PRESS P TO RESUME" : "");
+}
+
 // rules / how-to-play panel: opening it pauses the game
 function toggleInfo(show) {
   const modal = $("info-modal");
   const on = show !== undefined ? show : !modal.classList.contains("on");
   modal.classList.toggle("on", on);
-  state.paused = on;
+  state.paused = on || manualPause;
 }
 $("info-modal").addEventListener("pointerdown", (e) => {
   if (e.target === $("info-modal")) toggleInfo(false);
@@ -1288,17 +1323,17 @@ function autoRotateCamera(dt) {
   if (orbitCooldown > 0) { orbitCooldown -= dt; return; }
   if (state.phase !== "playing" || !pac.lastHorizWorld || !pac.moving) return;
 
-  const offset = camera.position.clone().sub(controls.target);
-  const sph = new THREE.Spherical().setFromVector3(offset);
+  const offset = _vA.copy(camera.position).sub(controls.target);
+  _sph.setFromVector3(offset);
   // camera sits behind pac: offset direction is the opposite of his heading
   const desired = Math.atan2(-pac.lastHorizWorld.x, -pac.lastHorizWorld.z);
-  let dTheta = desired - sph.theta;
+  let dTheta = desired - _sph.theta;
   while (dTheta > Math.PI) dTheta -= Math.PI * 2;
   while (dTheta < -Math.PI) dTheta += Math.PI * 2;
   // deadband so the view sits still on small corrections; slow eased drift
   if (Math.abs(dTheta) < 0.06) return;
-  sph.theta += dTheta * Math.min(1, dt * 0.7);
-  offset.setFromSpherical(sph);
+  _sph.theta += dTheta * Math.min(1, dt * 0.7);
+  offset.setFromSpherical(_sph);
   camera.position.copy(controls.target).add(offset);
 }
 
@@ -1368,12 +1403,12 @@ function updatePac(dt) {
   }
 
   // world position — vertical rides get an ease-in-out so floor changes glide
-  const a = cellToWorld(...pac.cell, new THREE.Vector3());
+  const a = cellToWorld(...pac.cell, _vA);
   if (pac.moving) {
-    const b = segmentTarget(pac.cell, pac.next, pac.dir, new THREE.Vector3());
+    const b = segmentTarget(pac.cell, pac.next, pac.dir, _vB);
     pac.pos.lerpVectors(a, b, pac.dir[0] !== 0 ? smooth(pac.t) : pac.t);
     if (pac.dir[0] === 0) {
-      pac.lastHorizWorld = new THREE.Vector3(pac.dir[2], 0, pac.dir[1]);
+      (pac.lastHorizWorld ||= new THREE.Vector3()).set(pac.dir[2], 0, pac.dir[1]);
     }
   } else {
     pac.pos.copy(a);
@@ -1386,9 +1421,9 @@ function updatePac(dt) {
   pacOutline.geometry = mouthGeos[idx];
   pacGroup.position.copy(pac.pos);
   if (pac.dir && (pac.dir[0] || pac.dir[1] || pac.dir[2])) {
-    const world = new THREE.Vector3(pac.dir[2], pac.dir[0], pac.dir[1]).normalize();
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), world);
-    pacGroup.quaternion.slerp(q, Math.min(1, dt * 14));
+    const world = _vC.set(pac.dir[2], pac.dir[0], pac.dir[1]).normalize();
+    _q.setFromUnitVectors(X_AXIS, world);
+    pacGroup.quaternion.slerp(_q, Math.min(1, dt * 14));
   }
   pacLight.position.copy(pac.pos).y += 0.6;
   updateTrail();
@@ -1551,11 +1586,11 @@ function updateGhost(g, dt) {
   }
 
   // world position — same vertical easing as Pac-Man
-  const a = cellToWorld(...g.cell, new THREE.Vector3());
+  const a = cellToWorld(...g.cell, _vA);
   if (g.next) {
     const b = g.dir
-      ? segmentTarget(g.cell, g.next, g.dir, new THREE.Vector3())
-      : cellToWorld(...g.next, new THREE.Vector3());
+      ? segmentTarget(g.cell, g.next, g.dir, _vB)
+      : cellToWorld(...g.next, _vB);
     g.pos.lerpVectors(a, b, g.next[0] !== g.cell[0] ? smooth(g.t) : g.t);
   } else {
     g.pos.copy(a);
@@ -1613,29 +1648,33 @@ function updateGhostVisual(g, dt) {
   const isEyes = g.state === "eyes" || g.state === "entering";
   body.visible = !isEyes;
 
-  if (g.frightened && !isEyes) {
-    const blinking = state.frightTimer < FRIGHT_BLINK &&
-      Math.floor(state.frightTimer * 5) % 2 === 0;
-    for (const m of tintMats) {
-      m.color.setHex(blinking ? 0xe8ecff : 0x0a1030);
-      m.emissive.setHex(blinking ? 0xffffff : 0x2438e0);
+  // tint writes only happen when the visual state actually flips
+  const blinking = g.frightened && !isEyes && state.frightTimer < FRIGHT_BLINK &&
+    Math.floor(state.frightTimer * 5) % 2 === 0;
+  const tintKey = !g.frightened || isEyes ? 0 : blinking ? 2 : 1;
+  if (g.vis.tintKey !== tintKey) {
+    g.vis.tintKey = tintKey;
+    if (tintKey > 0) {
+      for (const m of tintMats) {
+        m.color.setHex(blinking ? 0xe8ecff : 0x0a1030);
+        m.emissive.setHex(blinking ? 0xffffff : 0x2438e0);
+      }
+      for (const m of eyeMats) m.color.setHex(0xffffff);
+    } else {
+      for (const m of tintMats) {
+        m.color.setHex(g.color).multiplyScalar(0.45);
+        m.emissive.setHex(g.color);
+      }
+      for (const m of eyeMats) m.color.setHex(IRIS_COLORS[g.name]);
     }
-    for (const m of eyeMats) m.color.setHex(0xffffff);
-  } else {
-    for (const m of tintMats) {
-      m.color.setHex(g.color).multiplyScalar(0.45);
-      m.emissive.setHex(g.color);
-    }
-    for (const m of eyeMats) m.color.setHex(IRIS_COLORS[g.name]);
   }
 
   // face the travel direction (horizontal component)
   if (g.dir && (g.dir[1] || g.dir[2])) {
-    const look = g.pos.clone().add(new THREE.Vector3(g.dir[2], 0, g.dir[1]));
-    const q = new THREE.Quaternion();
-    const m = new THREE.Matrix4().lookAt(look, g.pos, new THREE.Vector3(0, 1, 0));
-    q.setFromRotationMatrix(m);
-    group.quaternion.slerp(q, Math.min(1, dt * 10));
+    const look = _vC.set(g.pos.x + g.dir[2], g.pos.y, g.pos.z + g.dir[1]);
+    _m4.lookAt(look, g.pos, UP);
+    _q.setFromRotationMatrix(_m4);
+    group.quaternion.slerp(_q, Math.min(1, dt * 10));
   }
   eyes.visible = true;
 }
@@ -1772,6 +1811,7 @@ function adaptQuality(dt) {
 
 // ---------------------------------------------------------------- main loop
 let lastTime = performance.now();
+let mmAccum = 1; // minimap redraws at ~30 Hz — invisible, but cheaper
 
 function tick(now) {
   requestAnimationFrame(tick);
@@ -1878,8 +1918,8 @@ function tick(now) {
       camOffset.copy(camera.position).sub(controls.target);
     }
   }
-  const targetPos = pac.cell ? pac.pos : new THREE.Vector3(0, LAYER_H, 0);
-  const delta = targetPos.clone().sub(controls.target).multiplyScalar(Math.min(1, dt * 8));
+  const targetPos = pac.cell ? pac.pos : _vB.set(0, LAYER_H, 0);
+  const delta = _vA.copy(targetPos).sub(controls.target).multiplyScalar(Math.min(1, dt * 8));
   controls.target.add(delta);
   camera.position.add(delta);
   autoRotateCamera(dt);
@@ -1889,7 +1929,11 @@ function tick(now) {
   if (!userOrbiting && !camTween && !CAM_MODES[camMode].rotate) {
     camera.position.copy(controls.target).add(camOffset);
   }
-  updateMinimap();
+  mmAccum += dt;
+  if (mmAccum >= 1 / 30) {
+    mmAccum = 0;
+    updateMinimap();
+  }
 
   composer.render();
 }

@@ -126,6 +126,53 @@ canvas {
   50% { background: #ffffff; }
 }
 
+/* ---------------- active fruit chip ---------------- */
+#fruit-chip {
+  position: absolute;
+  top: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  color: var(--accent-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+#fruit-chip.on { opacity: 1; }
+
+#fruit-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 8px currentColor;
+}
+
+#fruit-bar-wrap {
+  width: 72px;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  flex: none;
+}
+
+#fruit-bar {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ffd447, #ff9933);
+  border-radius: 4px;
+  transition: width 0.1s linear;
+}
+
 /* ---------------- right column: minimap + floor stack ---------------- */
 #right-col {
   position: absolute;
@@ -241,6 +288,14 @@ canvas {
   padding: 30px 54px;
   backdrop-filter: blur(6px);
   box-shadow: 0 8px 40px rgba(255, 212, 71, 0.18);
+  animation: msg-pop 0.3s ease-out;
+}
+
+@keyframes msg-pop {
+  from {
+    transform: translate(-50%, -50%) scale(0.9);
+    opacity: 0;
+  }
 }
 
 #message .sub {

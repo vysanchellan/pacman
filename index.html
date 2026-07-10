@@ -27,6 +27,11 @@
         <div class="stat"><span class="hud-label">LIVES</span><span id="lives"></span></div>
       </div>
       <div id="fright-wrap"><div id="fright-bar"></div></div>
+      <div id="fruit-chip" class="panel">
+        <span id="fruit-icon"></span>
+        <span id="fruit-label"></span>
+        <div id="fruit-bar-wrap"><div id="fruit-bar"></div></div>
+      </div>
     </div>
 
     <div id="right-col">
@@ -51,6 +56,8 @@
       <span><b>PGDN</b> FLOOR DOWN</span>
       <span><b>C</b> VIEW</span>
       <span><b>R</b> RECENTER</span>
+      <span><b>P</b> PAUSE</span>
+      <span><b>I</b> HELP</span>
       <span><b>DRAG</b> CAMERA</span>
     </div>
   </div>
@@ -85,6 +92,7 @@
         <span class="kbd">PGDN</span> / <span class="kbd">Q</span> / <span class="kbd">SHIFT</span> down a floor<br />
         <span class="kbd">C</span> camera view (fixed / follow / top-down) &middot;
         <span class="kbd">R</span> recenter view &middot;
+        <span class="kbd">P</span> pause &middot;
         <span class="kbd">DRAG</span> orbit &middot; <span class="kbd">WHEEL</span> zoom &middot;
         <span class="kbd">I</span> this panel &middot; <span class="kbd">ENTER</span> start
       </p>
@@ -121,10 +129,12 @@
       race home as eyes and are reborn. Frightened time shrinks every level.</p>
 
       <h3>FRUITS</h3>
-      <p>At 25% / 50% / 75% of dots eaten, a bonus fruit appears <b>on a random floor</b>
-      (gold beacon + announcement) for 12 seconds. Values climb with level:
-      Cherry 100, Strawberry 300, Orange 500, Apple 700, Melon 1000, Galaxian 2000,
-      Bell 3000, Key 5000. Detour or not &mdash; that's the gamble.</p>
+      <p>At 25% / 50% / 75% of dots eaten, a bonus fruit appears at the classic arcade
+      spot &mdash; <b>the center court just below the keep</b> &mdash; but on a
+      <b>random floor</b> (gold beacon + chip at the top of the screen with a countdown)
+      for 12 seconds. Values climb with level: Cherry 100, Strawberry 300, Orange 500,
+      Apple 700, Melon 1000, Galaxian 2000, Bell 3000, Key 5000. Detour or not &mdash;
+      that's the gamble.</p>
 
       <h3>SPEED &amp; LEVELS</h3>
       <p>Speeds match the original arcade: level 1 you run at 80% of full speed, wraiths
