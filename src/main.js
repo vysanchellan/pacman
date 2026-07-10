@@ -14,7 +14,7 @@ import { sfx } from "./audio.js";
 // ---------------------------------------------------------------- constants
 // bump on every visual change: shown in the HUD so a screenshot always tells
 // us which build a player is actually running (stale-cache detector)
-const BUILD = "V5 · CLASSIC WRAITHS";
+const BUILD = "V6 · NEON WRAITHS";
 const LAYER_H = 2.4; // world height between floors
 const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
 const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
@@ -818,99 +818,181 @@ function updateTrail() {
 }
 
 // ---------------------------------------------------------------- ghost visuals
-// yokai wraiths: hooded lathe cloaks with tattered hems, inked outlines and
-// angry glowing eye slits. Each keeps a signature trait:
-//   blinky — oni horns   pinky — trailing ribbons
-//   inky — kitsune mask  clyde — hulking build
+// Neon-arcade wraiths. Classic silhouette (dome + torso + zig-zag hem) built
+// ONLY from primitives that provably render on every GPU we've seen — the
+// old sculpted-lathe cloak drew as a black shell on some hardware. Design
+// layers: flat classic-color body, darker under-shade band + alternating hem,
+// additive glow shell + hem ring, tinted aura sprite, white arcade eyes with
+// glowing pupils under angry brows. Signature traits:
+//   blinky — oni horns   pinky — head bow + ribbons
+//   inky — kitsune mask  clyde — hulking shoulders   wisp — spirit flame
+const ghostAuraTex = (() => {
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = 128;
+  const ctx = cv.getContext("2d");
+  const rg = ctx.createRadialGradient(64, 64, 8, 64, 64, 64);
+  rg.addColorStop(0, "rgba(255,255,255,0.65)");
+  rg.addColorStop(0.45, "rgba(255,255,255,0.22)");
+  rg.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+})();
+
 function makeGhostMesh(color, name) {
   const group = new THREE.Group();
+  const shadeHex = new THREE.Color(color).multiplyScalar(0.55).getHex();
 
-  // Classic arcade silhouette rebuilt from primitives that provably render
-  // on every GPU we've seen (sphere/cylinder/cone — same classes as pac, the
-  // towers and the shaft beams). The old LatheGeometry cloak + BackSide
-  // outline shell silently failed to draw on some hardware, leaving a black
-  // hood. Flat unlit classic color: can never be black.
   const bodyMat = new THREE.MeshBasicMaterial({ color });
+  const shadeMat = new THREE.MeshBasicMaterial({ color: shadeHex });
+  const glowMat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.28,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+
   const body = new THREE.Group();
   const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.36, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat);
+    new THREE.SphereGeometry(0.36, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat);
   head.position.y = 0.18;
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.4, 0.5, 20), bodyMat);
-  torso.position.y = -0.07;
-  body.add(head, torso);
-  // classic zig-zag hem: a ring of downward spikes
-  for (let i = 0; i < 9; i++) {
-    const a = (i / 9) * Math.PI * 2;
-    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.18, 6), bodyMat);
-    spike.position.set(Math.cos(a) * 0.31, -0.36, Math.sin(a) * 0.31);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.41, 0.48, 24), bodyMat);
+  torso.position.y = -0.06;
+  // darker under-skirt band: cheap two-tone depth
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.44, 0.15, 24), shadeMat);
+  band.position.y = -0.29;
+  body.add(head, torso, band);
+  // zig-zag hem: alternating long/short spikes in body/shade tones
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const long = i % 2 === 0;
+    const spike = new THREE.Mesh(
+      new THREE.ConeGeometry(long ? 0.12 : 0.09, long ? 0.22 : 0.15, 6),
+      long ? bodyMat : shadeMat);
+    spike.position.set(Math.cos(a) * 0.32, long ? -0.4 : -0.38, Math.sin(a) * 0.32);
     spike.rotation.x = Math.PI;
     body.add(spike);
   }
+  // additive neon shell over the dome + glow ring at the hem
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(0.43, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), glowMat);
+  shell.position.y = 0.14;
+  const hemRing = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.028, 8, 30), glowMat);
+  hemRing.rotation.x = Math.PI / 2;
+  hemRing.position.y = -0.36;
+  body.add(shell, hemRing);
+  // soft tinted aura so each wraith reads as a colored lantern from afar
+  const auraMat = new THREE.SpriteMaterial({
+    map: ghostAuraTex, color, transparent: true, opacity: 0.5,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const aura = new THREE.Sprite(auraMat);
+  aura.scale.setScalar(1.9);
+  aura.position.y = 0.05;
+  body.add(aura);
   body.position.y = -0.02;
 
   const tintMats = [bodyMat];
+  const shadeMats = [shadeMat];
+  const glowMats = [glowMat, auraMat];
 
-  // signature traits
+  // signature traits (all unlit — same reliability rule as the body)
+  const flat = (c) => new THREE.MeshBasicMaterial({ color: c });
   if (name === "blinky") {
+    // oni horns: dark blood-red, tipped with gold
     for (const side of [-1, 1]) {
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 8), toonMat(0x55111f));
-      horn.position.set(side * 0.13, 0.56, 0);
-      horn.rotation.z = side * -0.55;
-      body.add(horn);
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.26, 8), flat(0x6e1020));
+      horn.position.set(side * 0.15, 0.58, 0);
+      horn.rotation.z = side * -0.5;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 8), flat(0xffd447));
+      tip.position.set(side * 0.21, 0.7, 0);
+      tip.rotation.z = side * -0.5;
+      body.add(horn, tip);
     }
   } else if (name === "pinky") {
+    // head bow: two cone loops + a knot, plus her trailing ribbons
+    const bowMat = flat(0xffe1f0);
     for (const side of [-1, 1]) {
-      const ribbonMat = toonMat(0xffb2d8);
-      const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.34, 0.02), ribbonMat);
-      ribbon.position.set(side * 0.17, 0.4, -0.12);
-      ribbon.rotation.x = -0.7;
+      const loop = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.18, 8), bowMat);
+      loop.position.set(side * 0.14, 0.52, -0.06);
+      loop.rotation.z = side * (Math.PI / 2 + 0.25);
+      body.add(loop);
+      const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.36, 0.02), bowMat);
+      ribbon.position.set(side * 0.17, 0.34, -0.2);
+      ribbon.rotation.x = -0.75;
       ribbon.rotation.z = side * 0.35;
       body.add(ribbon);
     }
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), flat(0xff8fc8));
+    knot.position.set(0, 0.52, -0.06);
+    body.add(knot);
   } else if (name === "inky") {
-    const mask = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), toonMat(0xf2f4ff));
-    mask.position.set(0, 0.2, 0.2);
-    mask.scale.set(1.05, 1.25, 0.4);
+    // kitsune mask with cheek stripes
+    const mask = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), flat(0xf2f4ff));
+    mask.position.set(0, 0.22, 0.18);
+    mask.scale.set(1.08, 1.3, 0.42);
     body.add(mask);
+    for (const side of [-1, 1]) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.02), flat(0x0088cc));
+      stripe.position.set(side * 0.14, 0.14, 0.3);
+      stripe.rotation.z = side * 0.5;
+      body.add(stripe);
+    }
   } else if (name === "clyde") {
-    body.scale.set(1.18, 0.94, 1.18);
+    // hulking: broad shoulder pads and extra girth
+    for (const side of [-1, 1]) {
+      const pad = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), shadeMat);
+      pad.position.set(side * 0.34, 0.06, 0);
+      pad.scale.set(1, 0.8, 1);
+      body.add(pad);
+    }
+    body.scale.set(1.16, 0.95, 1.16);
   } else if (name === "wisp") {
-    // crooked spirit-flame on his head — the chaos marker
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.28, 8),
-      new THREE.MeshBasicMaterial({ color: 0x99ffbb }));
-    flame.position.set(0.04, 0.58, 0);
+    // layered spirit flame: pale core inside the green tongue
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 8), flat(0x99ffbb));
+    flame.position.set(0.04, 0.66, 0);
     flame.rotation.z = -0.35;
-    body.add(flame);
+    const core = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 8), flat(0xeafff2));
+    core.position.set(0.045, 0.62, 0);
+    core.rotation.z = -0.35;
+    body.add(flame, core);
   }
   group.add(body);
 
-  // classic arcade eyes: white ovals + glowing per-ghost pupils
-  // (also serve as the disembodied "eyes" state when eaten)
+  // classic arcade eyes: white ovals + glowing per-ghost pupils under angry
+  // brows (the eyes also serve as the disembodied "eyes" state when eaten)
   const eyes = new THREE.Group();
   const eyeMats = [];
   for (const side of [-1, 1]) {
-    const zOff = name === "inky" ? 0.3 : 0.24;
-    const white = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10),
+    const zOff = name === "inky" ? 0.3 : 0.25;
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.105, 12, 10),
       new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    white.position.set(side * 0.14, 0.3, zOff);
-    white.scale.set(0.75, 1.1, 0.75);
+    white.position.set(side * 0.145, 0.3, zOff);
+    white.scale.set(0.75, 1.15, 0.7);
     const pupilMat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
     eyeMats.push(pupilMat);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), pupilMat);
-    pupil.position.set(side * 0.14, 0.29, zOff + 0.06);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), pupilMat);
+    pupil.position.set(side * 0.145, 0.29, zOff + 0.065);
     eyes.add(white, pupil);
+    // angry brow wedge over each eye — "\ /"
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.045, 0.05),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.3).getHex() }));
+    brow.position.set(side * 0.15, 0.43, zOff);
+    brow.rotation.z = side * -0.42;
+    body.add(brow);
   }
   group.add(eyes);
 
-  // every material in the rig, for whole-ghost fading when it's on another floor
+  // every material in the rig, for whole-ghost fading when it's on another
+  // floor — each remembers its own base opacity so glow layers stay subtle
   const fadeMats = [];
   group.traverse((o) => {
-    if (o.isMesh) {
+    if (o.isMesh || o.isSprite) {
       o.material.transparent = true;
+      o.material.userData.baseOp = o.material.opacity;
       fadeMats.push(o.material);
     }
   });
-  return { group, body, tintMats, eyeMats, eyes, fadeMats };
+  const baseScale = body.scale.clone();
+  return { group, body, tintMats, shadeMats, glowMats, eyeMats, eyes, fadeMats, baseScale };
 }
 
 // ---------------------------------------------------------------- entities
@@ -1619,16 +1701,20 @@ function stepGhostNormally(g, dt, speed, target, frightened = false, useBfs = fa
 }
 
 function updateGhostVisual(g, dt) {
-  const { group, body, tintMats, eyeMats, eyes, beacon, beaconMat, fadeMats } = g.vis;
+  const { group, body, tintMats, shadeMats, glowMats, eyeMats, eyes,
+    beacon, beaconMat, fadeMats, baseScale } = g.vis;
   group.position.copy(g.pos);
 
   // ghosts on other floors go translucent — but stay clearly COLORED: at the
   // old 0.22 they read as black silhouettes against the dark backdrop. The
-  // beacon + altitude difference still says "not on your floor".
+  // beacon + altitude difference still says "not on your floor". Each
+  // material fades relative to its own base opacity (glow layers stay soft).
   const pacFloor = pac.cell ? pac.cell[0] : 1;
   const targetOp = g.cell[0] === pacFloor ? 1 : 0.55;
   const k = Math.min(1, dt * 10);
-  for (const m of fadeMats) m.opacity += (targetOp - m.opacity) * k;
+  for (const m of fadeMats) {
+    m.opacity += (targetOp * (m.userData.baseOp || 1) - m.opacity) * k;
+  }
 
   // beacon tracks the wraith from above, tinted by its state
   beacon.position.set(g.pos.x, g.pos.y + 1.5, g.pos.z);
@@ -1642,8 +1728,14 @@ function updateGhostVisual(g, dt) {
     beaconMat.color.setHex(g.color);
     beaconMat.opacity = 0.5;
   }
-  // floating spirit bob (the wisp adds a drunken sway)
-  body.position.y = -0.02 + Math.sin(state.elapsed * 5 + g.releaseDelay * 2) * 0.045;
+  // floating spirit bob with a gentle squash-and-stretch breathe
+  // (the wisp adds a drunken sway)
+  const phase = state.elapsed * 5 + g.releaseDelay * 2;
+  body.position.y = -0.02 + Math.sin(phase) * 0.05;
+  body.scale.set(
+    baseScale.x * (1 - Math.sin(phase) * 0.03),
+    baseScale.y * (1 + Math.sin(phase) * 0.045),
+    baseScale.z * (1 - Math.sin(phase) * 0.03));
   if (g.name === "wisp") body.rotation.z = Math.sin(state.elapsed * 6.5) * 0.14;
 
   const isEyes = g.state === "eyes" || g.state === "entering";
@@ -1658,9 +1750,13 @@ function updateGhostVisual(g, dt) {
     if (tintKey > 0) {
       // frightened: bright arcade blue (white during the end-of-timer blink)
       for (const m of tintMats) m.color.setHex(blinking ? 0xffffff : 0x2438e0);
+      for (const m of shadeMats) m.color.setHex(blinking ? 0xbfd0ff : 0x141e66);
+      for (const m of glowMats) m.color.setHex(blinking ? 0xffffff : 0x3355ff);
       for (const m of eyeMats) m.color.setHex(blinking ? 0x2438e0 : 0xffffff);
     } else {
       for (const m of tintMats) m.color.setHex(g.color);
+      for (const m of shadeMats) m.color.setHex(g.color).multiplyScalar(0.55);
+      for (const m of glowMats) m.color.setHex(g.color);
       for (const m of eyeMats) m.color.setHex(IRIS_COLORS[g.name]);
     }
   }
