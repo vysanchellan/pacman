@@ -14,7 +14,7 @@ import { sfx } from "./audio.js";
 // ---------------------------------------------------------------- constants
 // bump on every visual change: shown in the HUD so a screenshot always tells
 // us which build a player is actually running (stale-cache detector)
-const BUILD = "V4 · UNLIT WRAITHS";
+const BUILD = "V5 · CLASSIC WRAITHS";
 const LAYER_H = 2.4; // world height between floors
 const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
 const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
@@ -825,46 +825,36 @@ function updateTrail() {
 function makeGhostMesh(color, name) {
   const group = new THREE.Group();
 
-  const pts = [
-    new THREE.Vector2(0.001, 0.52),
-    new THREE.Vector2(0.14, 0.44),
-    new THREE.Vector2(0.28, 0.24),
-    new THREE.Vector2(0.33, 0.02),
-    new THREE.Vector2(0.37, -0.16),
-    new THREE.Vector2(0.44, -0.34),
-  ];
-  const cloakGeo = new THREE.LatheGeometry(pts, 24);
-  const cp = cloakGeo.attributes.position;
-  for (let i = 0; i < cp.count; i++) {
-    if (cp.getY(i) < -0.28) {
-      const ang = Math.atan2(cp.getZ(i), cp.getX(i));
-      cp.setY(i, cp.getY(i) + Math.sin(ang * 5) * 0.06);
-    }
-  }
-  cloakGeo.computeVertexNormals();
-
-  // UNLIT flat classic-color cloak. The toon/emissive variant failed to
-  // render on some GPUs (cloak invisible → only the black outline hull
-  // showed). MeshBasicMaterial ignores lighting entirely: the exact arcade
-  // color on every machine, guaranteed.
-  const cloakMat = new THREE.MeshBasicMaterial({
-    color, side: THREE.DoubleSide,
-  });
+  // Classic arcade silhouette rebuilt from primitives that provably render
+  // on every GPU we've seen (sphere/cylinder/cone — same classes as pac, the
+  // towers and the shaft beams). The old LatheGeometry cloak + BackSide
+  // outline shell silently failed to draw on some hardware, leaving a black
+  // hood. Flat unlit classic color: can never be black.
+  const bodyMat = new THREE.MeshBasicMaterial({ color });
   const body = new THREE.Group();
-  const cloak = new THREE.Mesh(cloakGeo, cloakMat);
-  const outline = new THREE.Mesh(cloakGeo,
-    new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide }));
-  outline.scale.setScalar(1.07);
-  body.add(cloak, outline);
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.36, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat);
+  head.position.y = 0.18;
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.4, 0.5, 20), bodyMat);
+  torso.position.y = -0.07;
+  body.add(head, torso);
+  // classic zig-zag hem: a ring of downward spikes
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.18, 6), bodyMat);
+    spike.position.set(Math.cos(a) * 0.31, -0.36, Math.sin(a) * 0.31);
+    spike.rotation.x = Math.PI;
+    body.add(spike);
+  }
   body.position.y = -0.02;
 
-  const tintMats = [cloakMat];
+  const tintMats = [bodyMat];
 
   // signature traits
   if (name === "blinky") {
     for (const side of [-1, 1]) {
       const horn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 8), toonMat(0x55111f));
-      horn.position.set(side * 0.13, 0.44, 0);
+      horn.position.set(side * 0.13, 0.56, 0);
       horn.rotation.z = side * -0.55;
       body.add(horn);
     }
@@ -894,17 +884,21 @@ function makeGhostMesh(color, name) {
   }
   group.add(body);
 
-  // angry glowing eye slits (also serve as the "eyes" state when eaten)
+  // classic arcade eyes: white ovals + glowing per-ghost pupils
+  // (also serve as the disembodied "eyes" state when eaten)
   const eyes = new THREE.Group();
   const eyeMats = [];
   for (const side of [-1, 1]) {
-    const mat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
-    eyeMats.push(mat);
-    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.03), mat);
-    const zOff = name === "inky" ? 0.34 : 0.3;
-    slit.position.set(side * 0.13, 0.2, zOff);
-    slit.rotation.z = side * 0.38; // "\ /" glare
-    eyes.add(slit);
+    const zOff = name === "inky" ? 0.3 : 0.24;
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    white.position.set(side * 0.14, 0.3, zOff);
+    white.scale.set(0.75, 1.1, 0.75);
+    const pupilMat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
+    eyeMats.push(pupilMat);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), pupilMat);
+    pupil.position.set(side * 0.14, 0.29, zOff + 0.06);
+    eyes.add(white, pupil);
   }
   group.add(eyes);
 
