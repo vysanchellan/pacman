@@ -1624,11 +1624,12 @@ function updateGhostVisual(g, dt) {
   const { group, body, tintMats, eyeMats, eyes, beacon, beaconMat, fadeMats } = g.vis;
   group.position.copy(g.pos);
 
-  // ghosts on other floors fade way down so they can't be mistaken for a
-  // threat on yours — the beacon still marks them
+  // ghosts on other floors go translucent — but stay clearly COLORED: at the
+  // old 0.22 they read as black silhouettes against the dark backdrop. The
+  // beacon + altitude difference still says "not on your floor".
   const pacFloor = pac.cell ? pac.cell[0] : 1;
-  const targetOp = g.cell[0] === pacFloor ? 1 : 0.22;
-  const k = Math.min(1, dt * 8);
+  const targetOp = g.cell[0] === pacFloor ? 1 : 0.55;
+  const k = Math.min(1, dt * 10);
   for (const m of fadeMats) m.opacity += (targetOp - m.opacity) * k;
 
   // beacon tracks the wraith from above, tinted by its state
