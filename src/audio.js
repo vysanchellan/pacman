@@ -133,12 +133,27 @@ export const sfx = {
     wakaStep = now - lastWaka > 0.45 ? 0 : Math.min(wakaStep + 1, PENTA.length - 1);
     lastWaka = now;
     wakaSide = !wakaSide;
-    const f = 523 * Math.pow(2, PENTA[wakaStep] / 12);
-    const pan = wakaSide ? 0.22 : -0.22;
-    tone({ type: "sine", from: f * 1.35, to: f, dur: 0.07, vol: 0.075, pan, send: 0.12 });
-    tone({ type: "triangle", from: f * 2, to: f * 1.9, dur: 0.05, vol: 0.028, pan, send: 0.1 });
-    tone({ type: "sine", from: 130, to: 95, dur: 0.06, vol: 0.05, pan: pan * 0.4, send: 0 });
-    hiss({ dur: 0.02, vol: 0.014, from: 5200, to: 2800, q: 1.4, pan, send: 0 });
+    const drift = 1 + (Math.random() - 0.5) * 0.02; // human micro-variation
+    const f = 523 * Math.pow(2, PENTA[wakaStep] / 12) * drift;
+    const pan = wakaSide ? 0.24 : -0.24;
+    tone({ type: "sine", from: f * 1.4, to: f, dur: 0.06, vol: 0.095, pan, send: 0.12 });
+    tone({ type: "triangle", from: f * 2, to: f * 1.85, dur: 0.045, vol: 0.032, pan, send: 0.1 });
+    tone({ type: "sine", from: 140, to: 88, dur: 0.055, vol: 0.07, pan: pan * 0.4, send: 0 });
+    hiss({ dur: 0.018, vol: 0.02, from: 6000, to: 3000, q: 1.4, pan, send: 0 });
+  }),
+
+  // fruit spawn: a heraldic two-note bell so the announcement has a voice
+  fruit: safe(() => {
+    tone({ type: "sine", from: 880, dur: 0.16, vol: 0.045, send: 0.5 });
+    tone({ type: "sine", from: 1175, dur: 0.22, vol: 0.04, delay: 0.11, send: 0.55 });
+    tone({ type: "triangle", from: 440, dur: 0.25, vol: 0.02, send: 0.4 });
+  }),
+
+  // fruit collect: rich coin ding + sub reward thump
+  fruitCollect: safe(() => {
+    tone({ type: "sine", from: 1319, dur: 0.12, vol: 0.05, send: 0.45 });
+    tone({ type: "sine", from: 1760, dur: 0.2, vol: 0.04, delay: 0.07, send: 0.55 });
+    tone({ type: "sine", from: 160, to: 70, dur: 0.16, vol: 0.06, send: 0 });
   }),
 
   // power pellet: warm detuned riser + sub swell + a three-note shimmer
@@ -185,4 +200,69 @@ export const sfx = {
       tone({ type: "sine", from: f, dur: 0.2, vol: 0.04, delay: i * 0.11, send: 0.45 }));
     tone({ type: "sine", from: 98, dur: 0.5, vol: 0.04, send: 0.1 });
   }),
+
+  // ambient mood bed — "calm" is a barely-there castle drone that breathes,
+  // "fright" adds a wobbling tension voice. Crossfaded, never abrupt.
+  mood: safe((name) => {
+    ensureMood();
+    const ac = ctx;
+    const t = ac.currentTime;
+    moodCalmGain.gain.setTargetAtTime(name === "calm" ? 0.016 : 0, t, 0.5);
+    moodFrightGain.gain.setTargetAtTime(name === "fright" ? 0.03 : 0, t, 0.3);
+  }),
 };
+
+let moodCalmGain = null;
+let moodFrightGain = null;
+
+function ensureMood() {
+  if (moodCalmGain) return;
+  const ac = ensureCtx();
+
+  // calm: detuned sub pair + a faint fifth, breathing on a slow LFO
+  moodCalmGain = ctx.createGain();
+  moodCalmGain.gain.value = 0;
+  const breath = ac.createGain();
+  breath.gain.value = 0.75;
+  const lfo = ac.createOscillator();
+  lfo.frequency.value = 0.12;
+  const lfoAmt = ac.createGain();
+  lfoAmt.gain.value = 0.22;
+  lfo.connect(lfoAmt);
+  lfoAmt.connect(breath.gain);
+  lfo.start();
+  for (const [f, v] of [[55, 1], [55.6, 0.8], [82.4, 0.35]]) {
+    const o = ac.createOscillator();
+    o.type = "sine";
+    o.frequency.value = f;
+    const g = ac.createGain();
+    g.gain.value = v;
+    o.connect(g);
+    g.connect(breath);
+    o.start();
+  }
+  breath.connect(moodCalmGain);
+  moodCalmGain.connect(master);
+
+  // fright: low square through a slowly wobbling lowpass
+  moodFrightGain = ctx.createGain();
+  moodFrightGain.gain.value = 0;
+  const wob = ac.createOscillator();
+  wob.type = "square";
+  wob.frequency.value = 98;
+  const lp = ac.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 320;
+  lp.Q.value = 4;
+  const wobLfo = ac.createOscillator();
+  wobLfo.frequency.value = 3.1;
+  const wobAmt = ac.createGain();
+  wobAmt.gain.value = 180;
+  wobLfo.connect(wobAmt);
+  wobAmt.connect(lp.frequency);
+  wobLfo.start();
+  wob.connect(lp);
+  lp.connect(moodFrightGain);
+  moodFrightGain.connect(master);
+  wob.start();
+}

@@ -15,7 +15,7 @@ import { sfx } from "./audio.js";
 // ---------------------------------------------------------------- constants
 // bump on every visual change: shown in the HUD so a screenshot always tells
 // us which build a player is actually running (stale-cache detector)
-const BUILD = "V7 · SMOOTH + SOUND";
+const BUILD = "V8 · SILK + SIREN";
 const LAYER_H = 2.4; // world height between floors
 const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
 const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
@@ -549,11 +549,21 @@ const floorMeshRefs = []; // per-floor meshes, so invisible floors skip renderin
   }
 }
 
-// vertical shaft beams — highlighted when Pac-Man can use them
-const shaftBeams = []; // { mesh, mat, lowLayer, r, c }
-const shaftRings = []; // animated rings rising through each shaft
+// vertical shaft beams — ALL idle beams are one merged mesh (was 22 draws);
+// two reusable highlight beams glow at whatever shaft Pac-Man can use.
+// Elevator rings: every ring of the same animation phase shares one merged
+// mesh whose whole geometry rides up together (44 draws → 2).
+const shaftHighlights = []; // [upBeam, downBeam] repositioned on demand
+const shaftRingPhases = []; // { mesh, mat, phase }
 {
-  const shaftGeo = new THREE.CylinderGeometry(0.34, 0.34, LAYER_H, 14, 1, true);
+  const beamGeoAt = (low, r, c) => {
+    const geo = new THREE.CylinderGeometry(0.34, 0.34, LAYER_H, 12, 1, true);
+    const v = cellToWorld(low, r, c, new THREE.Vector3());
+    geo.translate(v.x, v.y + LAYER_H / 2, v.z);
+    return geo;
+  };
+  const beamGeos = [];
+  const ringGeosByPhase = [[], []];
   const seen = new Set();
   for (const [l, r, c] of mazeData.shafts) {
     for (const low of [l - 1, l]) {
@@ -561,32 +571,44 @@ const shaftRings = []; // animated rings rising through each shaft
       if (low < 0 || seen.has(key)) continue;
       if (!canMoveVertical(low, low + 1, r, c)) continue;
       seen.add(key);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0x4dffdf, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide,
-      });
-      const beam = new THREE.Mesh(shaftGeo, mat);
-      cellToWorld(low, r, c, beam.position);
-      beam.position.y += LAYER_H / 2;
-      beam.renderOrder = 3;
-      scene.add(beam);
-      shaftBeams.push({ mesh: beam, mat, lowLayer: low, r, c });
-
-      // rising elevator rings inside the shaft
+      beamGeos.push(beamGeoAt(low, r, c));
+      const v = cellToWorld(low, r, c, new THREE.Vector3());
       for (let k = 0; k < 2; k++) {
-        const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(0.3, 0.022, 6, 16),
-          new THREE.MeshBasicMaterial({
-            color: 0x4dffdf, transparent: true, opacity: 0,
-            blending: THREE.AdditiveBlending, depthWrite: false,
-          })
-        );
-        ring.rotation.x = Math.PI / 2;
-        ring.position.set(beam.position.x, 0, beam.position.z);
-        ring.renderOrder = 4;
-        scene.add(ring);
-        shaftRings.push({ ring, baseY: low * LAYER_H, phase: k / 2 });
+        const ring = new THREE.TorusGeometry(0.3, 0.022, 6, 16);
+        ring.rotateX(Math.PI / 2);
+        ring.translate(v.x, low * LAYER_H, v.z);
+        ringGeosByPhase[k].push(ring);
       }
     }
+  }
+  const idleBeams = new THREE.Mesh(mergeGeometries(beamGeos), new THREE.MeshBasicMaterial({
+    color: 0x4dffdf, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide,
+  }));
+  idleBeams.renderOrder = 3;
+  scene.add(idleBeams);
+
+  for (let k = 0; k < 2; k++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x4dffdf, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(mergeGeometries(ringGeosByPhase[k]), mat);
+    mesh.renderOrder = 4;
+    scene.add(mesh);
+    shaftRingPhases.push({ mesh, mat, phase: k / 2 });
+  }
+
+  for (let i = 0; i < 2; i++) {
+    const hl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.34, LAYER_H, 12, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0x4dffdf, transparent: true, opacity: 0.4,
+        depthWrite: false, side: THREE.DoubleSide,
+      }));
+    hl.renderOrder = 3;
+    hl.visible = false;
+    scene.add(hl);
+    shaftHighlights.push(hl);
   }
 
   // ghost house door
@@ -703,7 +725,7 @@ function spawnFruit() {
   icon.style.color = hex;
   $("fruit-chip").classList.add("on");
   toast(`${def.name} ON FLOOR ${cell[0] + 1} — ${def.points} PTS`);
-  sfx.power();
+  sfx.fruit();
 }
 
 function updateFruit(dt) {
@@ -720,7 +742,7 @@ function updateFruit(dt) {
   if (state.phase === "playing" && pac.pos.distanceTo(f.group.position) < 0.75) {
     addScore(f.def.points);
     popup(`+${f.def.points}`, f.group.position, "#ffd447");
-    sfx.eatGhost();
+    sfx.fruitCollect();
     updateHud();
     clearFruit();
   }
@@ -1073,6 +1095,13 @@ function addScore(n) {
   }
 }
 
+// ambient bed follows the game state: calm drone while playing, tension
+// wobble while the wraiths are frightened, silence everywhere else
+function syncMood() {
+  if (state.paused || state.phase !== "playing") sfx.mood("off");
+  else sfx.mood(state.frightTimer > 0 ? "fright" : "calm");
+}
+
 let toastTimer = null;
 function toast(text) {
   const t = $("toast");
@@ -1232,6 +1261,7 @@ function newGame() {
   state.phaseTimer = 2.2;
   setMessage("READY!");
   sfx.start();
+  syncMood();
   updateHud();
 }
 
@@ -1303,6 +1333,7 @@ function togglePause() {
   manualPause = !manualPause;
   state.paused = manualPause;
   setMessage(manualPause ? "PAUSED" : "", manualPause ? "PRESS P TO RESUME" : "");
+  syncMood();
 }
 
 // rules / how-to-play panel: opening it pauses the game
@@ -1311,6 +1342,7 @@ function toggleInfo(show) {
   const on = show !== undefined ? show : !modal.classList.contains("on");
   modal.classList.toggle("on", on);
   state.paused = on || manualPause;
+  syncMood();
 }
 $("info-modal").addEventListener("pointerdown", (e) => {
   if (e.target === $("info-modal")) toggleInfo(false);
@@ -1524,6 +1556,7 @@ function eatAt(cell) {
     state.frightTimer = state.tuning.frightTime;
     state.frightMax = state.tuning.frightTime;
     state.eatChain = 0;
+    syncMood();
     for (const g of ghosts) {
       if (g.state === "eyes" || g.state === "entering") continue;
       g.frightened = true;
@@ -1549,6 +1582,7 @@ function levelUp() {
   state.phaseTimer = 2.6;
   setMessage(`LEVEL ${state.level}`, state.level === 2 ? "NOW IT GETS SERIOUS" : "THE CASTLE SHARPENS");
   sfx.win();
+  syncMood();
   updateHud();
 }
 
@@ -1781,6 +1815,7 @@ function checkCollisions() {
       state.phaseTimer = 1.6;
       sfx.death();
       setMessage("");
+      syncMood();
       return;
     }
   }
@@ -1827,19 +1862,24 @@ function updateVisibility() {
     pelletInst[l].visible = pelletMatByFloor[l].opacity > 0.02;
   }
 
-  // shaft beams: glow when Pac-Man is standing where they can be used
+  // shaft highlights: the two reusable glow beams park at whatever shaft
+  // segment Pac-Man is standing on and can actually ride
   const [cl, cr, cc] = pac.cell || [1, 0, 0];
-  let canUp = false;
-  let canDown = false;
-  for (const b of shaftBeams) {
-    const usable = !pac.moving && b.r === cr && b.c === cc &&
-      (b.lowLayer === cl || b.lowLayer + 1 === cl);
-    if (usable) {
-      if (b.lowLayer === cl) canUp = true;
-      if (b.lowLayer + 1 === cl) canDown = true;
-      b.mat.opacity = 0.4 + Math.sin(state.elapsed * 8) * 0.15;
-    } else {
-      b.mat.opacity = 0.18;
+  const canUp = !pac.moving && canMoveVertical(cl, cl + 1, cr, cc);
+  const canDown = !pac.moving && canMoveVertical(cl, cl - 1, cr, cc);
+  const pulse2 = 0.4 + Math.sin(state.elapsed * 8) * 0.15;
+  const [hlUp, hlDown] = shaftHighlights;
+  hlUp.visible = canUp;
+  hlDown.visible = canDown;
+  if (canUp || canDown) {
+    const v = cellToWorld(cl, cr, cc, _vA);
+    if (canUp) {
+      hlUp.position.set(v.x, cl * LAYER_H + LAYER_H / 2, v.z);
+      hlUp.material.opacity = pulse2;
+    }
+    if (canDown) {
+      hlDown.position.set(v.x, (cl - 1) * LAYER_H + LAYER_H / 2, v.z);
+      hlDown.material.opacity = pulse2;
     }
   }
 
@@ -1906,10 +1946,10 @@ function tick(now) {
   for (const mesh of powerMeshes) mesh.scale.setScalar(pulse);
   starField.rotation.y += dt * 0.008; // slow drift
   motes.rotation.y += dt * 0.012;
-  for (const { ring, baseY, phase } of shaftRings) {
+  for (const { mesh, mat, phase } of shaftRingPhases) {
     const t = (state.elapsed * 0.35 + phase) % 1;
-    ring.position.y = baseY + t * LAYER_H;
-    ring.material.opacity = 0.5 * Math.sin(Math.PI * t);
+    mesh.position.y = t * LAYER_H;
+    mat.opacity = 0.5 * Math.sin(Math.PI * t);
   }
   updateSky(dt);
   adaptQuality(dt);
@@ -1930,6 +1970,7 @@ function tick(now) {
       if (state.phaseTimer <= 0) {
         state.phase = "playing";
         setMessage("");
+        syncMood();
       }
       break;
 
@@ -1940,6 +1981,7 @@ function tick(now) {
         if (state.frightTimer <= 0) {
           state.frightTimer = 0;
           for (const g of ghosts) g.frightened = false;
+          syncMood();
         }
       } else {
         state.waveTimer += dt;
