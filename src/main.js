@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -14,7 +15,7 @@ import { sfx } from "./audio.js";
 // ---------------------------------------------------------------- constants
 // bump on every visual change: shown in the HUD so a screenshot always tells
 // us which build a player is actually running (stale-cache detector)
-const BUILD = "V6 · NEON WRAITHS";
+const BUILD = "V7 · SMOOTH + SOUND";
 const LAYER_H = 2.4; // world height between floors
 const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
 const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
@@ -513,31 +514,38 @@ const floorMeshRefs = []; // per-floor meshes, so invisible floors skip renderin
       transparent: true, opacity: 0.95, depthWrite: false,
     });
     towerGlowMats.push(goldMat);
+    // all four towers merged into one draw call per material (was 28 meshes
+    // per floor — geometry is static, so bake the transforms in)
     const hx = (COLS - 1) / 2 + 0.7;
     const hz = (ROWS - 1) / 2 + 0.7;
+    const stoneGeos = [];
+    const goldGeos = [];
+    const ringGeos = [];
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const tower = new THREE.Group();
-        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.88, 0.5, 12), towerMat);
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.64, 1.7, 14), towerMat);
-        barrel.position.y = 1.0;
-        const roof = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.05, 12), towerMat);
-        roof.position.y = 2.3;
-        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 6), goldMat);
-        spire.position.y = 3.0;
-        const finial = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), goldMat);
-        finial.position.y = 3.28;
-        tower.add(base, barrel, roof, spire, finial);
+        const tx = sx * hx;
+        const ty = l * LAYER_H - 0.2;
+        const tz = sz * hz;
+        const at = (geo, y, rx = 0) => {
+          if (rx) geo.rotateX(rx);
+          geo.translate(tx, ty + y, tz);
+          return geo;
+        };
+        stoneGeos.push(
+          at(new THREE.CylinderGeometry(0.74, 0.88, 0.5, 12), 0),
+          at(new THREE.CylinderGeometry(0.5, 0.64, 1.7, 14), 1.0),
+          at(new THREE.ConeGeometry(0.85, 1.05, 12), 2.3));
+        goldGeos.push(
+          at(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 6), 3.0),
+          at(new THREE.SphereGeometry(0.09, 10, 8), 3.28));
         for (const ry of [0.55, 1.5]) {
-          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.022, 8, 28), glowMat);
-          ring.rotation.x = Math.PI / 2;
-          ring.position.y = ry;
-          tower.add(ring);
+          ringGeos.push(at(new THREE.TorusGeometry(0.6, 0.022, 8, 24), ry, Math.PI / 2));
         }
-        tower.position.set(sx * hx, l * LAYER_H - 0.2, sz * hz);
-        scene.add(tower);
       }
     }
+    scene.add(new THREE.Mesh(mergeGeometries(stoneGeos), towerMat));
+    scene.add(new THREE.Mesh(mergeGeometries(goldGeos), goldMat));
+    scene.add(new THREE.Mesh(mergeGeometries(ringGeos), glowMat));
   }
 }
 
@@ -566,7 +574,7 @@ const shaftRings = []; // animated rings rising through each shaft
       // rising elevator rings inside the shaft
       for (let k = 0; k < 2; k++) {
         const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(0.3, 0.022, 8, 22),
+          new THREE.TorusGeometry(0.3, 0.022, 6, 16),
           new THREE.MeshBasicMaterial({
             color: 0x4dffdf, transparent: true, opacity: 0,
             blending: THREE.AdditiveBlending, depthWrite: false,
@@ -851,34 +859,37 @@ function makeGhostMesh(color, name) {
   });
 
   const body = new THREE.Group();
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.36, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat);
-  head.position.y = 0.18;
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.41, 0.48, 24), bodyMat);
-  torso.position.y = -0.06;
+  // bake transforms into merged geometry: one draw call per material instead
+  // of ~28 meshes per wraith (smoothness rule)
+  const xf = (geo, x, y, z, rx = 0, rz = 0) => {
+    if (rx) geo.rotateX(rx);
+    if (rz) geo.rotateZ(rz);
+    geo.translate(x, y, z);
+    return geo;
+  };
+  const bodyGeos = [
+    xf(new THREE.SphereGeometry(0.36, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), 0, 0.18, 0),
+    xf(new THREE.CylinderGeometry(0.36, 0.41, 0.48, 24), 0, -0.06, 0),
+  ];
   // darker under-skirt band: cheap two-tone depth
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.44, 0.15, 24), shadeMat);
-  band.position.y = -0.29;
-  body.add(head, torso, band);
+  const shadeGeos = [xf(new THREE.CylinderGeometry(0.415, 0.44, 0.15, 24), 0, -0.29, 0)];
   // zig-zag hem: alternating long/short spikes in body/shade tones
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
     const long = i % 2 === 0;
-    const spike = new THREE.Mesh(
-      new THREE.ConeGeometry(long ? 0.12 : 0.09, long ? 0.22 : 0.15, 6),
-      long ? bodyMat : shadeMat);
-    spike.position.set(Math.cos(a) * 0.32, long ? -0.4 : -0.38, Math.sin(a) * 0.32);
-    spike.rotation.x = Math.PI;
-    body.add(spike);
+    (long ? bodyGeos : shadeGeos).push(
+      xf(new THREE.ConeGeometry(long ? 0.12 : 0.09, long ? 0.22 : 0.15, 6),
+        Math.cos(a) * 0.32, long ? -0.4 : -0.38, Math.sin(a) * 0.32, Math.PI));
   }
   // additive neon shell over the dome + glow ring at the hem
-  const shell = new THREE.Mesh(
-    new THREE.SphereGeometry(0.43, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), glowMat);
-  shell.position.y = 0.14;
-  const hemRing = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.028, 8, 30), glowMat);
-  hemRing.rotation.x = Math.PI / 2;
-  hemRing.position.y = -0.36;
-  body.add(shell, hemRing);
+  const glowGeos = [
+    xf(new THREE.SphereGeometry(0.43, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), 0, 0.14, 0),
+    xf(new THREE.TorusGeometry(0.43, 0.028, 8, 24), 0, -0.36, 0, Math.PI / 2),
+  ];
+  body.add(
+    new THREE.Mesh(mergeGeometries(bodyGeos), bodyMat),
+    new THREE.Mesh(mergeGeometries(shadeGeos), shadeMat),
+    new THREE.Mesh(mergeGeometries(glowGeos), glowMat));
   // soft tinted aura so each wraith reads as a colored lantern from afar
   const auraMat = new THREE.SpriteMaterial({
     map: ghostAuraTex, color, transparent: true, opacity: 0.5,
@@ -894,91 +905,70 @@ function makeGhostMesh(color, name) {
   const shadeMats = [shadeMat];
   const glowMats = [glowMat, auraMat];
 
-  // signature traits (all unlit — same reliability rule as the body)
+  // signature traits (all unlit — same reliability rule as the body),
+  // merged into one draw call per material
   const flat = (c) => new THREE.MeshBasicMaterial({ color: c });
+  const addMerged = (geos, mat) => body.add(new THREE.Mesh(mergeGeometries(geos), mat));
   if (name === "blinky") {
     // oni horns: dark blood-red, tipped with gold
-    for (const side of [-1, 1]) {
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.26, 8), flat(0x6e1020));
-      horn.position.set(side * 0.15, 0.58, 0);
-      horn.rotation.z = side * -0.5;
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 8), flat(0xffd447));
-      tip.position.set(side * 0.21, 0.7, 0);
-      tip.rotation.z = side * -0.5;
-      body.add(horn, tip);
-    }
+    addMerged([-1, 1].map((s) =>
+      xf(new THREE.ConeGeometry(0.075, 0.26, 8), s * 0.15, 0.58, 0, 0, s * -0.5)), flat(0x6e1020));
+    addMerged([-1, 1].map((s) =>
+      xf(new THREE.ConeGeometry(0.03, 0.09, 8), s * 0.21, 0.7, 0, 0, s * -0.5)), flat(0xffd447));
   } else if (name === "pinky") {
     // head bow: two cone loops + a knot, plus her trailing ribbons
-    const bowMat = flat(0xffe1f0);
-    for (const side of [-1, 1]) {
-      const loop = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.18, 8), bowMat);
-      loop.position.set(side * 0.14, 0.52, -0.06);
-      loop.rotation.z = side * (Math.PI / 2 + 0.25);
-      body.add(loop);
-      const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.36, 0.02), bowMat);
-      ribbon.position.set(side * 0.17, 0.34, -0.2);
-      ribbon.rotation.x = -0.75;
-      ribbon.rotation.z = side * 0.35;
-      body.add(ribbon);
+    const bowGeos = [];
+    for (const s of [-1, 1]) {
+      bowGeos.push(
+        xf(new THREE.ConeGeometry(0.09, 0.18, 8), s * 0.14, 0.52, -0.06, 0, s * (Math.PI / 2 + 0.25)),
+        xf(new THREE.BoxGeometry(0.05, 0.36, 0.02), s * 0.17, 0.34, -0.2, -0.75, s * 0.35));
     }
-    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), flat(0xff8fc8));
-    knot.position.set(0, 0.52, -0.06);
-    body.add(knot);
+    addMerged(bowGeos, flat(0xffe1f0));
+    addMerged([xf(new THREE.SphereGeometry(0.055, 10, 8), 0, 0.52, -0.06)], flat(0xff8fc8));
   } else if (name === "inky") {
     // kitsune mask with cheek stripes
-    const mask = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), flat(0xf2f4ff));
-    mask.position.set(0, 0.22, 0.18);
-    mask.scale.set(1.08, 1.3, 0.42);
-    body.add(mask);
-    for (const side of [-1, 1]) {
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.02), flat(0x0088cc));
-      stripe.position.set(side * 0.14, 0.14, 0.3);
-      stripe.rotation.z = side * 0.5;
-      body.add(stripe);
-    }
+    const maskGeo = new THREE.SphereGeometry(0.22, 16, 12);
+    maskGeo.scale(1.08, 1.3, 0.42);
+    addMerged([xf(maskGeo, 0, 0.22, 0.18)], flat(0xf2f4ff));
+    addMerged([-1, 1].map((s) =>
+      xf(new THREE.BoxGeometry(0.1, 0.03, 0.02), s * 0.14, 0.14, 0.3, 0, s * 0.5)), flat(0x0088cc));
   } else if (name === "clyde") {
     // hulking: broad shoulder pads and extra girth
-    for (const side of [-1, 1]) {
-      const pad = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), shadeMat);
-      pad.position.set(side * 0.34, 0.06, 0);
-      pad.scale.set(1, 0.8, 1);
-      body.add(pad);
-    }
+    addMerged([-1, 1].map((s) => {
+      const pad = new THREE.SphereGeometry(0.14, 12, 10);
+      pad.scale(1, 0.8, 1);
+      return xf(pad, s * 0.34, 0.06, 0);
+    }), shadeMat);
     body.scale.set(1.16, 0.95, 1.16);
   } else if (name === "wisp") {
     // layered spirit flame: pale core inside the green tongue
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 8), flat(0x99ffbb));
-    flame.position.set(0.04, 0.66, 0);
-    flame.rotation.z = -0.35;
-    const core = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 8), flat(0xeafff2));
-    core.position.set(0.045, 0.62, 0);
-    core.rotation.z = -0.35;
-    body.add(flame, core);
+    addMerged([xf(new THREE.ConeGeometry(0.1, 0.32, 8), 0.04, 0.66, 0, 0, -0.35)], flat(0x99ffbb));
+    addMerged([xf(new THREE.ConeGeometry(0.05, 0.18, 8), 0.045, 0.62, 0, 0, -0.35)], flat(0xeafff2));
   }
   group.add(body);
 
   // classic arcade eyes: white ovals + glowing per-ghost pupils under angry
-  // brows (the eyes also serve as the disembodied "eyes" state when eaten)
+  // brows (the eyes also serve as the disembodied "eyes" state when eaten).
+  // Whites, pupils and brows are each one merged mesh.
   const eyes = new THREE.Group();
-  const eyeMats = [];
-  for (const side of [-1, 1]) {
-    const zOff = name === "inky" ? 0.3 : 0.25;
-    const white = new THREE.Mesh(new THREE.SphereGeometry(0.105, 12, 10),
-      new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    white.position.set(side * 0.145, 0.3, zOff);
-    white.scale.set(0.75, 1.15, 0.7);
-    const pupilMat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
-    eyeMats.push(pupilMat);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), pupilMat);
-    pupil.position.set(side * 0.145, 0.29, zOff + 0.065);
-    eyes.add(white, pupil);
-    // angry brow wedge over each eye — "\ /"
-    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.045, 0.05),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.3).getHex() }));
-    brow.position.set(side * 0.15, 0.43, zOff);
-    brow.rotation.z = side * -0.42;
-    body.add(brow);
-  }
+  const zOff = name === "inky" ? 0.3 : 0.25;
+  const oval = (r) => {
+    const geo = new THREE.SphereGeometry(r, 12, 10);
+    geo.scale(0.75, 1.15, 0.7);
+    return geo;
+  };
+  eyes.add(new THREE.Mesh(
+    mergeGeometries([-1, 1].map((s) => xf(oval(0.105), s * 0.145, 0.3, zOff))),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })));
+  const pupilMat = new THREE.MeshBasicMaterial({ color: IRIS_COLORS[name] });
+  const eyeMats = [pupilMat];
+  eyes.add(new THREE.Mesh(
+    mergeGeometries([-1, 1].map((s) =>
+      xf(new THREE.SphereGeometry(0.052, 10, 8), s * 0.145, 0.29, zOff + 0.065))),
+    pupilMat));
+  addMerged([-1, 1].map((s) =>
+    xf(new THREE.BoxGeometry(0.17, 0.045, 0.05), s * 0.15, 0.43, zOff, 0, s * -0.42)),
+  flat(new THREE.Color(color).multiplyScalar(0.3).getHex()));
   group.add(eyes);
 
   // every material in the rig, for whole-ghost fading when it's on another
