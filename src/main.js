@@ -12,6 +12,9 @@ import { GHOST_DEFS, pickTarget, chooseDirection, bfsDirection } from "./ghosts.
 import { sfx } from "./audio.js";
 
 // ---------------------------------------------------------------- constants
+// bump on every visual change: shown in the HUD so a screenshot always tells
+// us which build a player is actually running (stale-cache detector)
+const BUILD = "V4 · UNLIT WRAITHS";
 const LAYER_H = 2.4; // world height between floors
 const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
 const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
@@ -1945,6 +1948,7 @@ controls.target.copy(pac.pos);
 camera.position.copy(pac.pos).add(CAM_MODES[0].offset);
 updateHud();
 updateFloorStack();
+$("build-tag").textContent = BUILD;
 setMessage("PAC-MAN 3D", "PRESS ENTER TO START");
 requestAnimationFrame(tick);
 

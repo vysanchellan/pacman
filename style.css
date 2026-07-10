@@ -466,6 +466,17 @@ canvas {
 
 #info-close:hover { background: rgba(255, 212, 71, 0.12); }
 
+/* ---------------- build tag (stale-cache detector) ---------------- */
+#build-tag {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  color: rgba(154, 146, 133, 0.55);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
 /* ---------------- bottom help ---------------- */
 #hud-bottom {
   position: absolute;
