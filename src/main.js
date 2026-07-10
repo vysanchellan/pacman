@@ -840,10 +840,11 @@ function makeGhostMesh(color, name) {
   }
   cloakGeo.computeVertexNormals();
 
-  // full classic-color cloak with a matching glow — instantly identifiable
-  // even across the maze (the beacon arrow alone wasn't enough)
+  // full classic-color cloak that SELF-GLOWS its color: scene lighting is so
+  // dark that lit color alone still read as black — the strong emissive keeps
+  // every wraith unmistakably red/pink/cyan/orange/green from any angle
   const cloakMat = toonMat(color, {
-    side: THREE.DoubleSide, emissive: color, emissiveIntensity: 0.4,
+    side: THREE.DoubleSide, emissive: color, emissiveIntensity: 0.85,
   });
   const body = new THREE.Group();
   const cloak = new THREE.Mesh(cloakGeo, cloakMat);
