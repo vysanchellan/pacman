@@ -844,7 +844,7 @@ function makeGhostMesh(color, name) {
   // dark that lit color alone still read as black — the strong emissive keeps
   // every wraith unmistakably red/pink/cyan/orange/green from any angle
   const cloakMat = toonMat(color, {
-    side: THREE.DoubleSide, emissive: color, emissiveIntensity: 0.85,
+    side: THREE.DoubleSide, emissive: color, emissiveIntensity: 1.0,
   });
   const body = new THREE.Group();
   const cloak = new THREE.Mesh(cloakGeo, cloakMat);
