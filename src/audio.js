@@ -110,9 +110,64 @@ function hiss({ dur = 0.1, vol = 0.03, from = 800, to = 4000, q = 1,
   src.stop(t0 + dur + 0.05);
 }
 
+// bell instrument: inharmonic partials with independent decays — this is what
+// makes chimes sound like an instrument instead of a sine beep
+function bell(f, dur = 0.6, vol = 0.04, delay = 0, send = 0.5, pan = 0) {
+  const partials = [[1, 1], [2, 0.35], [2.76, 0.18], [4.5, 0.07]];
+  for (const [m, g] of partials) {
+    tone({ type: "sine", from: f * m, dur: dur * (m === 1 ? 1 : 0.55),
+      vol: vol * g, delay, send, pan, attack: 0.002 });
+  }
+}
+
 const safe = (fn) => (...args) => {
   try { fn(...args); } catch { /* audio is best-effort */ }
 };
+
+// ------------------------------------------------------------ generative bed
+// A quiet, ever-changing music layer on top of the drone: soft pentatonic
+// bells wandering while you play, an urgent minor pulse while the wraiths
+// are frightened. Scheduled with a small lookahead so timing stays tight.
+let moodName = "off";
+let musicTimer = null;
+let nextNote = 0;
+let beat = 0;
+const CALM_SCALE = [220, 246.9, 293.7, 329.6, 392, 440, 587.3];
+let melIdx = 3;
+
+function scheduleNote(t, step) {
+  const rel = Math.max(t - ctx.currentTime, 0);
+  beat++;
+  if (moodName === "calm") {
+    if (Math.random() < 0.4) {
+      melIdx = Math.min(CALM_SCALE.length - 1,
+        Math.max(0, melIdx + (Math.random() < 0.5 ? -1 : 1)));
+      bell(CALM_SCALE[melIdx], 0.55, 0.014, rel, 0.75);
+      if (Math.random() < 0.16) {
+        bell(CALM_SCALE[melIdx] * 2, 0.4, 0.007, rel + step / 2, 0.9);
+      }
+    }
+    if (beat % 16 === 0) bell(110, 1.2, 0.02, rel, 0.3);
+  } else if (moodName === "fright") {
+    tone({ type: "triangle", from: beat % 4 < 2 ? 110 : 130.8,
+      dur: 0.09, vol: 0.024, delay: rel, send: 0.15 });
+    if (beat % 4 === 0) hiss({ dur: 0.03, vol: 0.01, from: 6000, to: 5000, delay: rel });
+  }
+}
+
+function startMusic() {
+  if (musicTimer) return;
+  musicTimer = setInterval(() => {
+    if (moodName === "off" || !ctx || ctx.state !== "running") return;
+    const step = moodName === "fright" ? 0.21 : 0.34;
+    const ahead = ctx.currentTime + 0.4;
+    if (nextNote < ctx.currentTime - 0.5) nextNote = ctx.currentTime + 0.05;
+    while (nextNote < ahead) {
+      try { scheduleNote(nextNote, step); } catch { /* best-effort */ }
+      nextNote += step;
+    }
+  }, 120);
+}
 
 // Dot-eating is THE sound of the game, so it earns the most design:
 // a plucky pop (bright pitch-drop sine + soft octave sparkle + sub thump +
@@ -136,23 +191,32 @@ export const sfx = {
     const drift = 1 + (Math.random() - 0.5) * 0.02; // human micro-variation
     const f = 523 * Math.pow(2, PENTA[wakaStep] / 12) * drift;
     const pan = wakaSide ? 0.24 : -0.24;
-    tone({ type: "sine", from: f * 1.4, to: f, dur: 0.06, vol: 0.095, pan, send: 0.12 });
-    tone({ type: "triangle", from: f * 2, to: f * 1.85, dur: 0.045, vol: 0.032, pan, send: 0.1 });
+    // the pop gets brighter as the combo ladder climbs
+    const shine = wakaStep / (PENTA.length - 1);
+    tone({ type: "sine", from: f * 1.4, to: f, dur: 0.06, vol: 0.095, pan, send: 0.12 + shine * 0.15 });
+    tone({ type: "triangle", from: f * 2, to: f * 1.85, dur: 0.045, vol: 0.032 + shine * 0.02, pan, send: 0.1 });
     tone({ type: "sine", from: 140, to: 88, dur: 0.055, vol: 0.07, pan: pan * 0.4, send: 0 });
-    hiss({ dur: 0.018, vol: 0.02, from: 6000, to: 3000, q: 1.4, pan, send: 0 });
+    hiss({ dur: 0.018, vol: 0.02 + shine * 0.012, from: 6000, to: 3000, q: 1.4, pan, send: 0 });
+    // topping out the ladder earns a tiny victory chime
+    if (wakaStep === PENTA.length - 1) bell(2093, 0.3, 0.02, 0, 0.8, pan);
+  }),
+
+  // bonus life: rising bell fanfare over a warm root
+  extraLife: safe(() => {
+    [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => bell(f, 0.4, 0.034, i * 0.07, 0.6));
+    tone({ type: "sine", from: 131, dur: 0.7, vol: 0.05, send: 0.15 });
   }),
 
   // fruit spawn: a heraldic two-note bell so the announcement has a voice
   fruit: safe(() => {
-    tone({ type: "sine", from: 880, dur: 0.16, vol: 0.045, send: 0.5 });
-    tone({ type: "sine", from: 1175, dur: 0.22, vol: 0.04, delay: 0.11, send: 0.55 });
-    tone({ type: "triangle", from: 440, dur: 0.25, vol: 0.02, send: 0.4 });
+    bell(880, 0.4, 0.04, 0, 0.55);
+    bell(1175, 0.5, 0.035, 0.12, 0.6);
   }),
 
   // fruit collect: rich coin ding + sub reward thump
   fruitCollect: safe(() => {
-    tone({ type: "sine", from: 1319, dur: 0.12, vol: 0.05, send: 0.45 });
-    tone({ type: "sine", from: 1760, dur: 0.2, vol: 0.04, delay: 0.07, send: 0.55 });
+    bell(1319, 0.35, 0.045, 0, 0.5);
+    bell(1760, 0.45, 0.035, 0.08, 0.6);
     tone({ type: "sine", from: 160, to: 70, dur: 0.16, vol: 0.06, send: 0 });
   }),
 
@@ -187,26 +251,25 @@ export const sfx = {
     tone({ type: "sine", from: 392, to: 660, dur: 0.22, vol: 0.03, send: 0.4 });
   }),
 
-  // level clear: rising pentatonic sparkle over a warm swell
+  // level clear: rising bell cascade over a warm swell
   win: safe(() => {
-    [523, 659, 784, 1047, 1319].forEach((f, i) =>
-      tone({ type: "sine", from: f, dur: 0.22, vol: 0.045, delay: i * 0.09, send: 0.5 }));
-    tone({ type: "triangle", from: 262, to: 523, dur: 0.5, vol: 0.03, send: 0.4 });
+    [523, 659, 784, 1047, 1319].forEach((f, i) => bell(f, 0.45, 0.04, i * 0.09, 0.55));
+    tone({ type: "triangle", from: 262, to: 523, dur: 0.5, vol: 0.028, send: 0.4 });
   }),
 
-  // game start: inviting major-arpeggio bell + soft low root
+  // game start: inviting bell arpeggio + soft low root
   start: safe(() => {
-    [392, 523, 659, 784].forEach((f, i) =>
-      tone({ type: "sine", from: f, dur: 0.2, vol: 0.04, delay: i * 0.11, send: 0.45 }));
-    tone({ type: "sine", from: 98, dur: 0.5, vol: 0.04, send: 0.1 });
+    [392, 523, 659, 784].forEach((f, i) => bell(f, 0.45, 0.036, i * 0.11, 0.5));
+    tone({ type: "sine", from: 98, dur: 0.6, vol: 0.04, send: 0.1 });
   }),
 
   // ambient mood bed — "calm" is a barely-there castle drone that breathes,
   // "fright" adds a wobbling tension voice. Crossfaded, never abrupt.
   mood: safe((name) => {
     ensureMood();
-    const ac = ctx;
-    const t = ac.currentTime;
+    moodName = name;
+    startMusic();
+    const t = ctx.currentTime;
     moodCalmGain.gain.setTargetAtTime(name === "calm" ? 0.016 : 0, t, 0.5);
     moodFrightGain.gain.setTargetAtTime(name === "fright" ? 0.03 : 0, t, 0.3);
   }),

@@ -15,7 +15,7 @@ import { sfx } from "./audio.js";
 // ---------------------------------------------------------------- constants
 // bump on every visual change: shown in the HUD so a screenshot always tells
 // us which build a player is actually running (stale-cache detector)
-const BUILD = "V8 · SILK + SIREN";
+const BUILD = "V9 · BELLS + 1UP";
 const LAYER_H = 2.4; // world height between floors
 const FULL_SPEED = 9.5; // arcade "100%" in tiles per second
 const FRIGHT_SPEED = FULL_SPEED * 0.5; // frightened ghosts run at 50%, like the arcade
@@ -61,6 +61,9 @@ const FRUITS = [
   { name: "KEY", color: 0xdddddd, points: 5000 },
 ];
 const FRUIT_LIFETIME = 12;
+// arcade-style bonus lives: first at 10,000 points, then every 50,000
+const EXTRA_LIFE_FIRST = 10000;
+const EXTRA_LIFE_EVERY = 50000;
 // the arcade fruit spot: the open court directly below the ghost house,
 // centered between the two middle columns (open on every floor)
 const FRUIT_SPOT = [17, 13];
@@ -1064,6 +1067,7 @@ const state = {
   totalDots: 0,
   dotsPerFloor: [0, 0, 0],
   paused: false,
+  nextExtraLife: EXTRA_LIFE_FIRST,
   fruit: null, // { def, cell, timer, group }
   fruitAt: [],
   fruitSpawned: 0,
@@ -1089,6 +1093,15 @@ function updateHud() {
 }
 function addScore(n) {
   state.score += n;
+  while (state.score >= state.nextExtraLife) {
+    state.lives++;
+    state.nextExtraLife = state.nextExtraLife < EXTRA_LIFE_EVERY
+      ? EXTRA_LIFE_EVERY
+      : state.nextExtraLife + EXTRA_LIFE_EVERY;
+    toast("EXTRA LIFE!");
+    sfx.extraLife();
+    updateHud();
+  }
   if (state.score > state.high) {
     state.high = state.score;
     localStorage.setItem("pacman3d-high", String(state.high));
@@ -1251,6 +1264,7 @@ function resetPositions() {
 function newGame() {
   state.score = 0;
   state.lives = 2;
+  state.nextExtraLife = EXTRA_LIFE_FIRST;
   state.level = 1;
   state.tuning = levelTuning(1);
   spawnPellets();
